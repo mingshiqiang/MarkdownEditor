@@ -1,0 +1,17 @@
+# build output and dependencies
+out
+*.config.ts.*.mjs
+dist
+release
+release-*
+coverage
+node_modules
+package-lock.json
+
+# documentation is edited by hand (and docs/sample.md is an acceptance fixture)
+*.md
+docs
+
+# editor and user-owned files (CRLF, kept byte-for-byte)
+.vscode
+scripts/clean-release.cjs

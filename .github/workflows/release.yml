@@ -1,0 +1,131 @@
+name: Release
+
+# Builds the installers for Windows, macOS and Linux. A tag (v1.2.3) also
+# creates the GitHub release with the artifacts.
+#
+# Signing and notarization use these repository secrets:
+#   MAC_CERT_P12          base64 of the "Developer ID Application" certificate
+#   MAC_CERT_PASSWORD     password of that certificate
+#   APPLE_ID              Apple ID used for the notarization
+#   APPLE_APP_SPECIFIC_PASSWORD  app specific password of that Apple ID
+#   APPLE_TEAM_ID         Apple developer team id
+#   WIN_CERT_P12          base64 of the Windows code signing certificate
+#   WIN_CERT_PASSWORD     password of that certificate
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            arch: x64
+          - os: macos-latest
+            platform: mac
+            arch: x64
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check (lint, format, types, tests)
+        run: npm run check
+
+      # The certificate is imported into the keychain (macOS) or into the
+      # certificate store (Windows); electron-builder picks it up there.
+      - name: Import the macOS certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MAC_CERT_P12" ]; then
+            echo "MAC_CERT_P12 is not set - the build stays unsigned."
+            exit 0
+          fi
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/mac-cert.p12"
+          security create-keychain -p actions "$RUNNER_TEMP/mac.keychain"
+          security default-keychain -s "$RUNNER_TEMP/mac.keychain"
+          security unlock-keychain -p actions "$RUNNER_TEMP/mac.keychain"
+          security import "$RUNNER_TEMP/mac-cert.p12" -k "$RUNNER_TEMP/mac.keychain" \
+            -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$MAC_CERT_PASSWORD" "$RUNNER_TEMP/mac.keychain"
+
+      - name: Import the Windows certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WIN_CERT_P12: ${{ secrets.WIN_CERT_P12 }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: |
+          if (-not $env:WIN_CERT_P12) {
+            Write-Host "WIN_CERT_P12 is not set - the build stays unsigned."
+            exit 0
+          }
+          $bytes = [Convert]::FromBase64String($env:WIN_CERT_P12)
+          $file = Join-Path $env:RUNNER_TEMP 'win-cert.pfx'
+          [IO.File]::WriteAllBytes($file, $bytes)
+          $password = ConvertTo-SecureString -String $env:WIN_CERT_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $file -CertStoreLocation Cert:\CurrentUser\My -Password $password
+
+      - name: Build
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          npx electron-vite build
+          npx electron-builder --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdowneditor-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: false
+          generate_release_notes: true

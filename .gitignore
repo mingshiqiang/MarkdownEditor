@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+release/
+release-*/
+.build/
+*.local
+
+# Test & tooling caches
+.vite/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

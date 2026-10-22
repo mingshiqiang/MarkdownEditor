@@ -1,0 +1,119 @@
+appId: com.markdowneditor.app
+productName: MarkdownEditor
+copyright: Copyright © 2026 MarkdownEditor
+
+directories:
+  output: release
+  buildResources: resources
+
+# The app icon is shipped outside the asar so that the window/taskbar icon
+# can be loaded at runtime (extraResources -> <resources>/icon.png).
+extraResources:
+  - from: resources/icon.png
+    to: icon.png
+
+files:
+  - out/**
+  - '!**/*.map'
+  - '!**/*.ts'
+
+asar: true
+
+win:
+  # multi-resolution .ico (16..256 px), generated from resources/logo.png
+  icon: resources/icon.ico
+  artifactName: ${productName}-${version}-setup.${ext}
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  # Desktop shortcut + start menu entry
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MarkdownEditor
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
+  deleteAppDataOnUninstall: false
+  # Start menu category for the shortcut.
+  menuCategory: false
+
+# File associations (S-01): .md & friends open with MarkdownEditor.
+fileAssociations:
+  - ext: md
+    name: Markdown Document
+    role: Editor
+    icon: resources/icon.ico
+  - ext: markdown
+    name: Markdown Document
+    role: Editor
+    icon: resources/icon.ico
+  - ext: mkd
+    name: Markdown Document
+    role: Editor
+    icon: resources/icon.ico
+  - ext: mdown
+    name: Markdown Document
+    role: Editor
+    icon: resources/icon.ico
+  - ext: txt
+    name: Text Document
+    role: Editor
+    icon: resources/icon.ico
+
+mac:
+  icon: resources/logo.png
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    # The zip is required by the auto updater on macOS.
+    - target: zip
+      arch: [x64, arm64]
+  category: public.app-category.productivity
+  darkModeSupport: true
+  # Signed builds need the hardened runtime and the entitlements below.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  extendInfo:
+    NSHumanReadableCopyright: Copyright © 2026 MarkdownEditor
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+linux:
+  icon: resources/logo.png
+  category: Office
+  synopsis: A Typora-like WYSIWYG Markdown editor
+  description: >
+    MarkdownEditor is a cross platform editor for Markdown with live
+    rendering, a file tree, themes, tables, math, diagrams and export to
+    HTML, PDF, Word and long images.
+  desktop:
+    entry:
+      Name: MarkdownEditor
+      Comment: A Typora-like WYSIWYG Markdown editor
+      Categories: Office;TextEditor;
+      MimeType: text/markdown;text/plain;
+      StartupWMClass: MarkdownEditor
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+
+# The update feed. Empty by default: the feed URL can also be set in the
+# preferences ("auto update") or through MDE_UPDATE_URL. The release
+# workflow overrides it with --publish generic --config.publish.url=...
+publish: null
