@@ -123,6 +123,13 @@ function createWindow(): BrowserWindow {
     minWidth: 860,
     minHeight: 560,
     show: false,
+    frame: false,
+    resizable: true,
+    // Native rounded corners (Windows 11 / supported platforms) plus the
+    // standard invisible resize frame on all four edges and corners.
+    roundedCorners: true,
+    thickFrame: true,
+    autoHideMenuBar: true,
     backgroundColor: dark ? '#1f2227' : '#ffffff',
     title: 'MarkdownEditor',
     // Taskbar / window icon (Windows & Linux).
@@ -138,6 +145,18 @@ function createWindow(): BrowserWindow {
   })
 
   win.on('ready-to-show', () => win.show())
+
+  // Keep the custom title bar's maximize/restore icon in sync, including
+  // changes made through native shortcuts or the fullscreen menu item.
+  const sendWindowState = (): void => {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(IPC.WindowMaximized, win.isMaximized() || win.isFullScreen())
+    }
+  }
+  win.on('maximize', sendWindowState)
+  win.on('unmaximize', sendWindowState)
+  win.on('enter-full-screen', sendWindowState)
+  win.on('leave-full-screen', sendWindowState)
 
   // ---- security: block in-app navigation & window.open --------------------
   win.webContents.setWindowOpenHandler(({ url }) => {

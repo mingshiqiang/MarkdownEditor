@@ -8,7 +8,13 @@
  */
 import { app, dialog, Menu, type BrowserWindow } from 'electron'
 import { IPC } from '../../shared/types'
-import type { AppSettings, MenuAction, MenuActionId, RecentFile } from '../../shared/types'
+import type {
+  AppMenuId,
+  AppSettings,
+  MenuAction,
+  MenuActionId,
+  RecentFile
+} from '../../shared/types'
 import { resolveKeymap, type KeyActionId } from '../../shared/keymap'
 import { dictionaries, resolveLocale } from '../../shared/i18n'
 
@@ -18,6 +24,18 @@ export interface MenuContext {
 }
 
 let acceleratorsSuspended = false
+let popupMenus: Partial<Record<AppMenuId, Menu>> = {}
+
+/** Open a top-level menu from the custom title bar. */
+export function popupAppMenu(id: AppMenuId, win: BrowserWindow, x: number, y: number): void {
+  const menu = popupMenus[id]
+  if (!menu || win.isDestroyed()) return
+  menu.popup({
+    window: win,
+    x: Number.isFinite(x) ? Math.max(0, Math.round(x)) : undefined,
+    y: Number.isFinite(y) ? Math.max(0, Math.round(y)) : undefined
+  })
+}
 
 /**
  * While a shortcut is being recorded in the preferences, the menu accelerators
@@ -192,4 +210,15 @@ export function buildAppMenu(win: BrowserWindow, ctx: MenuContext): void {
     : [fileMenu, editMenu, viewMenu, helpMenu]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+
+  // The frameless window has no native menu bar. Reuse the exact same items
+  // (roles, submenus, radios, recent files and accelerators) as native popups.
+  const submenu = (item: Electron.MenuItemConstructorOptions) =>
+    Menu.buildFromTemplate((item.submenu as Electron.MenuItemConstructorOptions[]) ?? [])
+  popupMenus = {
+    file: submenu(fileMenu),
+    edit: submenu(editMenu),
+    view: submenu(viewMenu),
+    help: submenu(helpMenu)
+  }
 }

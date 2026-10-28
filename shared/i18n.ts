@@ -317,6 +317,9 @@ const zhCN = {
     // misc
     about: '关于',
     close: '关闭',
+    minimize: '最小化',
+    maximize: '最大化',
+    restore: '还原',
     copyCode: '复制',
     version: '版本'
   }
@@ -625,6 +628,9 @@ const en: typeof zhCN = {
     extDeleted: '"{name}" was deleted by another program',
     about: 'About',
     close: 'Close',
+    minimize: 'Minimize',
+    maximize: 'Maximize',
+    restore: 'Restore',
     copyCode: 'Copy',
     version: 'Version'
   }

@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS } from '../../shared/types'
 import { EXAMPLE_USER_THEME, parseUserTheme, type UserTheme } from '../../shared/userTheme'
 import type {
   Api,
+  AppMenuId,
   AppSettings,
   EffectiveTheme,
   ExternalChange,
@@ -85,6 +86,8 @@ export function createMockApi(): Api {
   // The browser preview has no native menu, so the menu actions can be
   // triggered from the console: window.__mdeMenu('file:export-pdf').
   const menuCallbacks: ((action: MenuAction) => void)[] = []
+  const maximizedCallbacks: ((maximized: boolean) => void)[] = []
+  let maximized = false
   if (typeof window !== 'undefined') {
     ;(window as unknown as Record<string, unknown>).__mdeMenu = (id: string, payload?: string) => {
       for (const cb of menuCallbacks) cb({ id: id as MenuAction['id'], payload })
@@ -216,6 +219,22 @@ export function createMockApi(): Api {
     syncWatch: async (_paths: string[]): Promise<void> => {},
     getTableLayout: async (_path: string): Promise<TableLayout> => ({}),
     setTableLayout: async (_path: string, _layout: TableLayout): Promise<void> => {},
+    popupAppMenu: async (_menu: AppMenuId, _x: number, _y: number): Promise<void> => {},
+    windowMinimize: async (): Promise<void> => {},
+    windowToggleMaximize: async (): Promise<boolean> => {
+      maximized = !maximized
+      for (const cb of maximizedCallbacks) cb(maximized)
+      return maximized
+    },
+    windowClose: async (): Promise<void> => {},
+    windowIsMaximized: async (): Promise<boolean> => maximized,
+    onWindowMaximized: (cb: (value: boolean) => void): Unsubscribe => {
+      maximizedCallbacks.push(cb)
+      return () => {
+        const index = maximizedCallbacks.indexOf(cb)
+        if (index >= 0) maximizedCallbacks.splice(index, 1)
+      }
+    },
     notifyDirty: async (_count: number): Promise<void> => {},
     confirmClose: async (_proceed: boolean): Promise<void> => {},
     appReady: async (): Promise<void> => {},

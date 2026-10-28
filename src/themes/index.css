@@ -320,12 +320,144 @@ input:focus {
   margin-left: 6px;
 }
 
+/* ------------------------- frameless window title bar ---------------------- */
+
+.title-bar {
+  position: relative;
+  z-index: 80;
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  height: 40px;
+  color: var(--fg);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.title-brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+}
+
+.title-logo {
+  display: block;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+
+.title-menus {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  padding: 0 3px;
+  -webkit-app-region: no-drag;
+}
+
+.title-menu-button {
+  height: 28px;
+  padding: 0 9px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+}
+
+.title-menu-button:hover,
+.title-menu-button:active {
+  color: var(--fg);
+  background: var(--bg-tab-active);
+}
+
+.title-drag-region {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.title-document {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.window-controls {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  -webkit-app-region: no-drag;
+}
+
+.window-control {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.window-control img {
+  width: 16px;
+  height: 16px;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.window-control:hover {
+  background: var(--bg-tab-active);
+}
+
+.window-control:hover img {
+  opacity: 1;
+}
+
+.window-control.window-close:hover {
+  color: #fff;
+  background: #e81123;
+}
+
+.window-control.window-close:hover img {
+  filter: brightness(0) invert(1);
+}
+
+html[data-theme='dark'] .window-control img,
+html[data-theme='dark-purple'] .window-control img {
+  filter: invert(1);
+}
+
 /* ------------------------------- app shell -------------------------------- */
 
 .app-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.app-shell.window-maximized {
+  border: 0;
+  border-radius: 0;
 }
 
 .app-body {

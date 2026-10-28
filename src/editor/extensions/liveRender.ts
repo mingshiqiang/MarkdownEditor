@@ -321,10 +321,17 @@ function clickedSourcePosition(
   const hit = clickedTextPosition(div, e.clientX, e.clientY)
   if (!hit) return base
   const source = view.state.sliceDoc(base, end)
-  const map = buildPlainTextMap(source)
-  const textOffset = textOffsetIn(div, hit.node, hit.offset)
-  if (textOffset < 0 || textOffset >= map.sourceIndex.length) return base
-  return base + map.sourceIndex[textOffset]
+  const options = { atomicMath: true }
+  const map = buildPlainTextMap(source, options)
+  const textOffset = textOffsetIn(div, hit.node, hit.offset, options)
+  if (textOffset < 0 || map.sourceIndex.length === 0) return base
+  // caretPositionFromPoint may return the boundary just after the last
+  // character. Map that to the end of the visible text, not to the block start.
+  const sourceOffset =
+    textOffset >= map.sourceIndex.length
+      ? map.sourceIndex[map.sourceIndex.length - 1] + 1
+      : map.sourceIndex[textOffset]
+  return Math.min(end, base + sourceOffset)
 }
 
 /**

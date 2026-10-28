@@ -8,6 +8,7 @@ import { IPC } from '../../shared/types'
 import type { UserTheme } from '../../shared/userTheme'
 import type {
   Api,
+  AppMenuId,
   AppSettings,
   EffectiveTheme,
   ExternalChange,
@@ -121,6 +122,15 @@ const api: Api = {
     ipcRenderer.invoke(IPC.TableLayoutGet, path) as Promise<TableLayout>,
   setTableLayout: (path: string, layout: TableLayout) =>
     ipcRenderer.invoke(IPC.TableLayoutSet, path, layout) as Promise<void>,
+  // custom title bar / window controls
+  popupAppMenu: (menu: AppMenuId, x: number, y: number) =>
+    ipcRenderer.invoke(IPC.WindowMenuPopup, menu, x, y) as Promise<void>,
+  windowMinimize: () => ipcRenderer.invoke(IPC.WindowMinimize) as Promise<void>,
+  windowToggleMaximize: () => ipcRenderer.invoke(IPC.WindowToggleMaximize) as Promise<boolean>,
+  windowClose: () => ipcRenderer.invoke(IPC.WindowClose) as Promise<void>,
+  windowIsMaximized: () => ipcRenderer.invoke(IPC.WindowIsMaximized) as Promise<boolean>,
+  onWindowMaximized: (cb: (maximized: boolean) => void) =>
+    subscribe<boolean>(IPC.WindowMaximized, cb),
   // lifecycle
   notifyDirty: (dirtyCount: number) =>
     ipcRenderer.invoke(IPC.AppNotifyDirty, dirtyCount) as Promise<void>,

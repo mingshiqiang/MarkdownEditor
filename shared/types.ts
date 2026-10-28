@@ -205,6 +205,9 @@ export interface WorkspaceInfo {
 
 export type SearchMode = 'name' | 'content'
 
+/** Top-level menus shown in the custom title bar. */
+export type AppMenuId = 'file' | 'edit' | 'view' | 'help'
+
 /** Column widths of the tables of a document (table key -> widths in px). */
 export type TableLayout = Record<string, number[]>
 
@@ -316,11 +319,17 @@ export const IPC = {
   // table column widths (display state, persisted per document)
   TableLayoutGet: 'table-layout:get',
   TableLayoutSet: 'table-layout:set',
-  // window lifecycle
+  // window lifecycle / custom title bar
+  WindowMenuPopup: 'window:menu-popup',
+  WindowMinimize: 'window:minimize',
+  WindowToggleMaximize: 'window:toggle-maximize',
+  WindowClose: 'window:close',
+  WindowIsMaximized: 'window:is-maximized',
   AppNotifyDirty: 'app:notify-dirty',
   AppConfirmClose: 'app:confirm-close',
   AppReady: 'app:ready',
   // main -> renderer events
+  WindowMaximized: 'window:maximized',
   MenuAction: 'menu:action',
   OpenFile: 'open:file',
   ExternalChange: 'fs:external-change',
@@ -399,6 +408,13 @@ export interface Api {
   // table column widths (persisted per document)
   getTableLayout(path: string): Promise<TableLayout>
   setTableLayout(path: string, layout: TableLayout): Promise<void>
+  // custom title bar / window controls
+  popupAppMenu(menu: AppMenuId, x: number, y: number): Promise<void>
+  windowMinimize(): Promise<void>
+  windowToggleMaximize(): Promise<boolean>
+  windowClose(): Promise<void>
+  windowIsMaximized(): Promise<boolean>
+  onWindowMaximized(cb: (maximized: boolean) => void): Unsubscribe
   // lifecycle
   notifyDirty(dirtyCount: number): Promise<void>
   /** Confirm or cancel the pending dirty-close dialog. */

@@ -19,6 +19,7 @@ import https from 'node:https'
 import path from 'node:path'
 import { IPC } from '../../shared/types'
 import type {
+  AppMenuId,
   AppSettings,
   ExternalChange,
   FileMeta,
@@ -57,7 +58,7 @@ import { uploadImage } from './imageHost'
 import { readTextFile, writeTextFileAtomic } from './fileIo'
 import { readTableLayout, writeTableLayout } from './tableLayout'
 import { checkForUpdates } from './updater'
-import { setAcceleratorsSuspended } from './menu'
+import { popupAppMenu, setAcceleratorsSuspended } from './menu'
 import {
   listUserThemes,
   nativeThemeSourceFor,
@@ -628,6 +629,49 @@ function registerTableLayoutHandlers(): void {
 }
 
 function registerLifecycleHandlers(getWin: () => BrowserWindow | null): void {
+  ipcMain.handle(IPC.WindowMenuPopup, (_e, id: unknown, x: unknown, y: unknown): Promise<void> => {
+    const menus: AppMenuId[] = ['file', 'edit', 'view', 'help']
+    const w = getWin()
+    if (w && !w.isDestroyed() && menus.includes(id as AppMenuId)) {
+      popupAppMenu(
+        id as AppMenuId,
+        w,
+        typeof x === 'number' ? x : Number.NaN,
+        typeof y === 'number' ? y : Number.NaN
+      )
+    }
+    return Promise.resolve()
+  })
+
+  ipcMain.handle(IPC.WindowMinimize, (): Promise<void> => {
+    const w = getWin()
+    if (w && !w.isDestroyed()) w.minimize()
+    return Promise.resolve()
+  })
+
+  ipcMain.handle(IPC.WindowToggleMaximize, (): Promise<boolean> => {
+    const w = getWin()
+    if (!w || w.isDestroyed()) return Promise.resolve(false)
+    if (w.isFullScreen()) w.setFullScreen(false)
+    else if (w.isMaximized()) w.unmaximize()
+    else w.maximize()
+    const expanded = w.isMaximized() || w.isFullScreen()
+    return Promise.resolve(expanded)
+  })
+
+  ipcMain.handle(IPC.WindowClose, (): Promise<void> => {
+    const w = getWin()
+    // BrowserWindow.close() enters the existing dirty-document confirmation
+    // flow (and the optional close-to-tray behavior) in main/index.ts.
+    if (w && !w.isDestroyed()) w.close()
+    return Promise.resolve()
+  })
+
+  ipcMain.handle(IPC.WindowIsMaximized, (): Promise<boolean> => {
+    const w = getWin()
+    return Promise.resolve(Boolean(w && !w.isDestroyed() && (w.isMaximized() || w.isFullScreen())))
+  })
+
   ipcMain.handle(IPC.AppNotifyDirty, (_e, count: unknown): Promise<void> => {
     dirtyCount = typeof count === 'number' && count >= 0 ? Math.floor(count) : 0
     return Promise.resolve()

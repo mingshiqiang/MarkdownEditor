@@ -15,6 +15,7 @@ import { applyUserTheme } from './lib/userTheme'
 import { findImageRefs, isRemoteRef } from './editor/imageRefs'
 import { plainSettings } from './stores/settings'
 import { userThemeCss as buildUserThemeCss } from '../shared/userTheme'
+import TitleBar from './components/TitleBar.vue'
 import TabsBar from './components/TabsBar.vue'
 import EditorHost from './components/EditorHost.vue'
 import StatusBar from './components/StatusBar.vue'
@@ -37,6 +38,7 @@ const userThemeCss = computed(() => {
 const editorHost = ref<InstanceType<typeof EditorHost> | null>(null)
 const showSettings = ref(false)
 const showExport = ref(false)
+const windowMaximized = ref(false)
 
 /* --------------------------------- toast ---------------------------------- */
 
@@ -618,7 +620,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'focus-mode': settings.settings.workspace.focusMode }">
+  <div
+    class="app-shell"
+    :class="{
+      'focus-mode': settings.settings.workspace.focusMode,
+      'window-maximized': windowMaximized
+    }"
+  >
+    <TitleBar @maximized-change="windowMaximized = $event" />
     <div class="app-top">
       <button
         type="button"
