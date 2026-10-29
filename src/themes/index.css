@@ -1093,6 +1093,13 @@ html[data-theme='dark-purple'] .window-control img {
   border-radius: var(--radius-sm);
 }
 
+/* Drag-selection highlight across rendered blocks (CSS Custom Highlight API).
+   The native selection is suppressed while dragging so the rendered blocks
+   never switch to source and change height under the pointer. */
+::highlight(mde-drag-selection) {
+  background-color: var(--ed-selection);
+}
+
 /* ------------------- live preview: rendered / source parity ------------------
    When the caret enters a rendered block, the block switches to its source
    form. The rules below give the source lines the metrics of the rendered

@@ -264,7 +264,7 @@ export function wrapRangeCommand(marker: string): Command {
 }
 
 /** Toggles a marker: first on a rendered cell selection, then on the source. */
-function toggleMarker(marker: string): Command {
+export function toggleMarker(marker: string): Command {
   return (view: EditorView): boolean =>
     wrapRangeCommand(marker)(view) || toggleWrapCommand(marker)(view)
 }

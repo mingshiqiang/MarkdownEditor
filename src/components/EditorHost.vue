@@ -61,7 +61,7 @@ import {
   insertLinkCommand,
   insertTableCommand,
   setHeadingCommand,
-  toggleWrapCommand
+  toggleMarker
 } from '../editor/extensions/keymaps'
 import { docIdField } from '../editor/docFields'
 import { requestOpenDoc, toast } from '../lib/bus'
@@ -712,37 +712,37 @@ function formatItems(hasSelection: boolean): ContextMenuItem[] {
       id: 'bold',
       label: t('shortcuts.markdown:bold'),
       shortcut: keyHint('markdown:bold'),
-      action: () => runCommand(toggleWrapCommand('**'))
+      action: () => runCommand(toggleMarker('**'))
     },
     {
       id: 'italic',
       label: t('shortcuts.markdown:italic'),
       shortcut: keyHint('markdown:italic'),
-      action: () => runCommand(toggleWrapCommand('*'))
+      action: () => runCommand(toggleMarker('*'))
     },
     {
       id: 'strike',
       label: t('shortcuts.markdown:strike'),
       shortcut: keyHint('markdown:strike'),
-      action: () => runCommand(toggleWrapCommand('~~'))
+      action: () => runCommand(toggleMarker('~~'))
     },
     {
       id: 'highlight',
       label: t('shortcuts.markdown:highlight'),
       shortcut: keyHint('markdown:highlight'),
-      action: () => runCommand(toggleWrapCommand('=='))
+      action: () => runCommand(toggleMarker('=='))
     },
     {
       id: 'code',
       label: t('shortcuts.markdown:code'),
       shortcut: keyHint('markdown:code'),
-      action: () => runCommand(toggleWrapCommand('`'))
+      action: () => runCommand(toggleMarker('`'))
     },
     {
       id: 'math',
       label: t('shortcuts.markdown:math'),
       shortcut: keyHint('markdown:math'),
-      action: () => runCommand(toggleWrapCommand('$'))
+      action: () => runCommand(toggleMarker('$'))
     },
     {
       id: 'link',

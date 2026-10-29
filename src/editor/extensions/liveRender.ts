@@ -164,12 +164,27 @@ class MarkdownBlockWidget extends WidgetType {
       handleWidgetMouseDown(e, view, div, block, parsedTable)
     )
     div.addEventListener('mouseup', (e) => handleWidgetMouseUp(e, view))
+    // Links inside widgets are opened explicitly by the mousedown handler;
+    // never let a plain click navigate the whole renderer.
+    div.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a[href]')) e.preventDefault()
+    })
     return div
   }
 
   ignoreEvent(event: Event): boolean {
-    // We fully own mousedown on widgets; let other events pass through.
-    return event.type === 'mousedown'
+    // We own mouse interaction and native text selection inside a rendered
+    // block. In particular, CM must not sync a selection made inside the
+    // widget on `selectionchange`: that would switch the block to source and
+    // change its height while the user is still dragging. Drag & drop and
+    // other events still pass through to the editor.
+    return (
+      event.type === 'mousedown' ||
+      event.type === 'mouseup' ||
+      event.type === 'selectionchange' ||
+      event.type === 'click' ||
+      event.type === 'dblclick'
+    )
   }
 }
 
@@ -258,15 +273,159 @@ function handleWidgetMouseDown(
     // plain click on a link: fall through, reveal source at block start
   }
 
-  // Default: enter this block (reveal source). The caret goes to the
-  // position that was clicked, not to the start of the block.
-  e.preventDefault()
+  // Default: start a text selection inside the rendered block. We deliberately
+  // do NOT reveal the source on mousedown: switching the block to source
+  // changes its height under the pointer and made drag selection land on a
+  // different line. The native selection is mapped back to source on mouseup.
   const pos =
     clickedCodePosition(e, block) ?? clickedSourcePosition(view, div, e, block.from, block.to)
-  keepClickPosition(view, e, () => {
-    view.dispatch({ selection: EditorSelection.cursor(pos) })
-  })
-  view.focus()
+  beginRenderedTextSelection(view, div, pos, e)
+}
+
+/**
+ * Pending text selection started inside a rendered block. The block stays
+ * rendered while the mouse is down; on mouseup the DOM selection (or the
+ * click position for a simple click) is mapped back to the source.
+ */
+interface TextBoundary {
+  node: Node
+  offset: number
+}
+
+interface PendingTextSelection {
+  view: EditorView
+  pos: number
+  anchor: TextBoundary
+  last: TextBoundary | null
+  x: number
+  y: number
+  moved: boolean
+}
+
+const DRAG_HIGHLIGHT = 'mde-drag-selection'
+
+// `Range` is already the CodeMirror range type in this module.
+type DomRange = ReturnType<typeof document.createRange>
+
+interface HighlightRegistryLike {
+  set(name: string, highlight: unknown): void
+  delete(name: string): void
+}
+type HighlightCtor = new (...ranges: DomRange[]) => unknown
+
+/** Paint the drag range without touching the DOM selection (no re-layout). */
+function setDragHighlight(range: DomRange | null): void {
+  if (typeof CSS === 'undefined') return
+  const registry = (CSS as unknown as { highlights?: HighlightRegistryLike }).highlights
+  if (!registry) return
+  const Ctor = (window as unknown as { Highlight?: HighlightCtor }).Highlight
+  if (!range || !Ctor) {
+    registry.delete(DRAG_HIGHLIGHT)
+    return
+  }
+  registry.set(DRAG_HIGHLIGHT, new Ctor(range))
+}
+
+let pendingText: PendingTextSelection | null = null
+let pendingTextUp: ((event: MouseEvent) => void) | null = null
+let pendingTextMove: ((event: MouseEvent) => void) | null = null
+
+function cancelPendingText(): void {
+  if (pendingTextUp) document.removeEventListener('mouseup', pendingTextUp, true)
+  if (pendingTextMove) document.removeEventListener('mousemove', pendingTextMove, true)
+  pendingTextUp = null
+  pendingTextMove = null
+  pendingText = null
+  setDragHighlight(null)
+}
+
+// A drag that leaves the window may never deliver a mouseup.
+if (typeof window !== 'undefined') window.addEventListener('blur', cancelPendingText)
+
+function beginRenderedTextSelection(
+  view: EditorView,
+  widget: HTMLElement,
+  pos: number,
+  event: MouseEvent
+): void {
+  cancelPendingText()
+  const hit = clickedTextPosition(widget, event.clientX, event.clientY)
+  if (!hit || !widget.contains(hit.node)) {
+    // Images / blank areas have no text boundary: just reveal the source.
+    keepClickPosition(view, event, () => {
+      view.dispatch({ selection: EditorSelection.cursor(pos) })
+    })
+    view.focus()
+    return
+  }
+
+  pendingText = {
+    view,
+    pos,
+    anchor: { node: hit.node, offset: hit.offset },
+    last: null,
+    x: event.clientX,
+    y: event.clientY,
+    moved: false
+  }
+  // Prevent the native selection. We paint the range ourselves and map it to
+  // source offsets on mouseup, so the rendered blocks never switch to source
+  // (and never change height) while the mouse is down.
+  event.preventDefault()
+
+  const onMove = (move: MouseEvent): void => {
+    const pending = pendingText
+    if (!pending) return
+    if (!pending.moved && Math.hypot(move.clientX - pending.x, move.clientY - pending.y) <= 3) {
+      return
+    }
+    pending.moved = true
+    const current = clickedTextPosition(view.contentDOM, move.clientX, move.clientY)
+    if (!current || !view.contentDOM.contains(current.node)) return
+    const el = current.node.nodeType === Node.TEXT_NODE ? current.node.parentElement : current.node
+    if (!(el instanceof Element) || !el.closest('.cm-line, .cm-mdw')) return
+    pending.last = { node: current.node, offset: current.offset }
+    const range = document.createRange()
+    try {
+      range.setStart(pending.anchor.node, pending.anchor.offset)
+      range.setEnd(current.node, current.offset)
+    } catch {
+      try {
+        range.setStart(current.node, current.offset)
+        range.setEnd(pending.anchor.node, pending.anchor.offset)
+      } catch {
+        return
+      }
+    }
+    setDragHighlight(range)
+    move.preventDefault()
+  }
+
+  const onUp = (up: MouseEvent): void => {
+    const pending = pendingText
+    cancelPendingText()
+    if (!pending) return
+    if (pending.moved && pending.last) {
+      const start = sourcePositionOfDom(view, pending.anchor.node, pending.anchor.offset, 'start')
+      const end = sourcePositionOfDom(view, pending.last.node, pending.last.offset, 'end')
+      if (start !== null && end !== null && start !== end) {
+        view.dispatch({ selection: { anchor: start, head: end } })
+        view.focus()
+        return
+      }
+    }
+    // Simple click (or a drag that could not be mapped): place the caret at
+    // the clicked source position, as before.
+    keepClickPosition(view, up, () => {
+      view.dispatch({ selection: EditorSelection.cursor(pending.pos) })
+    })
+    view.focus()
+  }
+
+  pendingTextUp = onUp
+  pendingTextMove = onMove
+  document.addEventListener('mouseup', onUp, true)
+  document.addEventListener('mousemove', onMove, true)
 }
 
 /**
@@ -351,36 +510,90 @@ export function sourcePositionAt(view: EditorView, event: MouseEvent): number | 
   return clickedSourcePosition(view, widget, event, from, to)
 }
 
+/** Source position of a DOM boundary inside a rendered widget. */
+function widgetSourcePosition(
+  view: EditorView,
+  widget: HTMLElement,
+  node: Node,
+  offset: number,
+  bias: 'start' | 'end'
+): number | null {
+  const base = Number(widget.dataset.from)
+  const end = Number(widget.dataset.to)
+  if (!Number.isFinite(base) || !Number.isFinite(end)) return null
+
+  // Code is rendered verbatim; the source starts after the opening fence line.
+  if (widget.dataset.block === 'fence') {
+    const el =
+      node.nodeType === Node.TEXT_NODE ? node.parentElement : node instanceof Element ? node : null
+    const code = el?.closest('pre code') as HTMLElement | null
+    if (!code) return null
+    const source = view.state.sliceDoc(base, end)
+    const firstNewline = source.indexOf('\n')
+    if (firstNewline < 0) return null
+    return Math.min(end, base + firstNewline + 1 + textOffsetIn(code, node, offset))
+  }
+
+  const source = view.state.sliceDoc(base, end)
+  const options = { atomicMath: true }
+  const map = buildPlainTextMap(source, options)
+  if (!map.text.length) return base
+  const raw = textOffsetIn(widget, node, offset, options)
+  const clamped = Math.max(0, Math.min(map.text.length, raw))
+  if (bias === 'start') {
+    if (clamped >= map.text.length) {
+      return Math.min(end, base + map.sourceIndex[map.text.length - 1] + 1)
+    }
+    return base + map.sourceIndex[clamped]
+  }
+  if (clamped <= 0) return base
+  return Math.min(end, base + map.sourceIndex[clamped - 1] + 1)
+}
+
+/** Source position of a DOM boundary in a source line or rendered widget. */
+function sourcePositionOfDom(
+  view: EditorView,
+  node: Node,
+  offset: number,
+  bias: 'start' | 'end'
+): number | null {
+  const el =
+    node.nodeType === Node.TEXT_NODE ? node.parentElement : node instanceof Element ? node : null
+  const widget = el?.closest('.cm-mdw') as HTMLElement | null
+  if (widget) {
+    // Tables use their own cell-selection capture; when a drag crosses into
+    // one, clamp the endpoint to the table boundary.
+    if (widget.dataset.block === 'table') {
+      const base = Number(widget.dataset.from)
+      const end = Number(widget.dataset.to)
+      if (!Number.isFinite(base) || !Number.isFinite(end)) return null
+      return bias === 'start' ? base : end
+    }
+    return widgetSourcePosition(view, widget, node, offset, bias)
+  }
+  try {
+    return view.posAtDOM(node, offset)
+  } catch {
+    return null
+  }
+}
+
 /**
- * Map a text selection inside a rendered widget back to source offsets, so
- * the context menu can format/cut rendered selections. Returns false when
- * there is no selection inside the widget (the caller may then place a caret).
+ * Map a native selection in the editor back to source offsets. The selection
+ * may span one or more rendered widgets as well as source lines, which is what
+ * a drag starting in a rendered block produces.
  */
-export function captureRenderedSelection(view: EditorView, event: MouseEvent): boolean {
-  const target = event.target as HTMLElement | null
-  const widget = target?.closest('.cm-mdw') as HTMLElement | null
-  if (!widget || widget.dataset.block === 'table') return false
+export function captureRenderedSelection(view: EditorView, _event: MouseEvent): boolean {
   const selection = window.getSelection()
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
   const anchor = selection.anchorNode
   const focus = selection.focusNode
-  if (!anchor || !focus || !widget.contains(anchor) || !widget.contains(focus)) return false
-  const base = Number(widget.dataset.from)
-  const end = Number(widget.dataset.to)
-  if (!Number.isFinite(base) || !Number.isFinite(end)) return false
-  const source = view.state.sliceDoc(base, end)
-  const options = { atomicMath: true }
-  const anchorOffset = textOffsetIn(widget, anchor, selection.anchorOffset, options)
-  const focusOffset = textOffsetIn(widget, focus, selection.focusOffset, options)
-  if (anchorOffset < 0 || focusOffset < 0) return false
-  const range = sourceRangeOfTextRange(
-    source,
-    base,
-    Math.min(anchorOffset, focusOffset),
-    Math.max(anchorOffset, focusOffset)
-  )
-  if (!range) return false
-  view.dispatch({ selection: { anchor: range.from, head: range.to } })
+  if (!anchor || !focus) return false
+  if (!view.contentDOM.contains(anchor) || !view.contentDOM.contains(focus)) return false
+  const start = sourcePositionOfDom(view, anchor, selection.anchorOffset, 'start')
+  const end = sourcePositionOfDom(view, focus, selection.focusOffset, 'end')
+  if (start === null || end === null || start === end) return false
+  view.dispatch({ selection: { anchor: Math.min(start, end), head: Math.max(start, end) } })
   return true
 }
 
