@@ -36,6 +36,7 @@ import {
 import { CODE_LANGUAGES, fenceLangRange, fenceLanguage } from '../fence'
 import { addRemoteImageButtons } from '../remoteImage'
 import { markerOf, markerRange, sourceLineClasses } from '../sourceStyle'
+import { caretScrollDelta, dragMovesForward } from '../selectionGeometry'
 import { tableKey } from '../tableLayout'
 import type { ParsedTable } from '../tables'
 import { toast, requestOpenDoc } from '../../lib/bus'
@@ -300,6 +301,8 @@ interface PendingTextSelection {
   x: number
   y: number
   moved: boolean
+  /** Screen rect of the clicked caret, before the block switches to source. */
+  caretRect: DOMRect | null
 }
 
 const DRAG_HIGHLIGHT = 'mde-drag-selection'
@@ -352,21 +355,21 @@ function beginRenderedTextSelection(
   const hit = clickedTextPosition(widget, event.clientX, event.clientY)
   if (!hit || !widget.contains(hit.node)) {
     // Images / blank areas have no text boundary: just reveal the source.
-    keepClickPosition(view, event, () => {
-      view.dispatch({ selection: EditorSelection.cursor(pos) })
-    })
+    view.dispatch({ selection: EditorSelection.cursor(pos) })
     view.focus()
     return
   }
 
+  const anchor = { node: hit.node, offset: hit.offset }
   pendingText = {
     view,
     pos,
-    anchor: { node: hit.node, offset: hit.offset },
+    anchor,
     last: null,
     x: event.clientX,
     y: event.clientY,
-    moved: false
+    moved: false,
+    caretRect: caretRectAt(anchor)
   }
   // Prevent the native selection. We paint the range ourselves and map it to
   // source offsets on mouseup, so the rendered blocks never switch to source
@@ -380,11 +383,9 @@ function beginRenderedTextSelection(
       return
     }
     pending.moved = true
-    const current = clickedTextPosition(view.contentDOM, move.clientX, move.clientY)
-    if (!current || !view.contentDOM.contains(current.node)) return
-    const el = current.node.nodeType === Node.TEXT_NODE ? current.node.parentElement : current.node
-    if (!(el instanceof Element) || !el.closest('.cm-line, .cm-mdw')) return
-    pending.last = { node: current.node, offset: current.offset }
+    const current = boundaryInEditor(view, move.clientX, move.clientY)
+    if (!current) return
+    pending.last = current
     const range = document.createRange()
     try {
       range.setStart(pending.anchor.node, pending.anchor.offset)
@@ -405,18 +406,32 @@ function beginRenderedTextSelection(
     const pending = pendingText
     cancelPendingText()
     if (!pending) return
-    if (pending.moved && pending.last) {
-      const start = sourcePositionOfDom(view, pending.anchor.node, pending.anchor.offset, 'start')
-      const end = sourcePositionOfDom(view, pending.last.node, pending.last.offset, 'end')
-      if (start !== null && end !== null && start !== end) {
-        view.dispatch({ selection: { anchor: start, head: end } })
+    // A fast drag can release ahead of the last mousemove event: resolve the
+    // release point itself against the still-rendered block.
+    const release = boundaryInEditor(view, up.clientX, up.clientY) ?? pending.last
+    if (pending.moved && release) {
+      const forward = boundaryAfter(pending.anchor, release)
+      const anchorPos = sourcePositionOfDom(
+        view,
+        pending.anchor.node,
+        pending.anchor.offset,
+        forward ? 'start' : 'end'
+      )
+      const headPos = sourcePositionOfDom(
+        view,
+        release.node,
+        release.offset,
+        forward ? 'end' : 'start'
+      )
+      if (anchorPos !== null && headPos !== null && anchorPos !== headPos) {
+        view.dispatch({ selection: { anchor: anchorPos, head: headPos } })
         view.focus()
         return
       }
     }
     // Simple click (or a drag that could not be mapped): place the caret at
     // the clicked source position, as before.
-    keepClickPosition(view, up, () => {
+    keepCaretPosition(view, pending.caretRect, () => {
       view.dispatch({ selection: EditorSelection.cursor(pending.pos) })
     })
     view.focus()
@@ -426,6 +441,46 @@ function beginRenderedTextSelection(
   pendingTextMove = onMove
   document.addEventListener('mouseup', onUp, true)
   document.addEventListener('mousemove', onMove, true)
+}
+
+/** The caret boundary of a point inside the editor, if there is one. */
+function boundaryInEditor(view: EditorView, x: number, y: number): TextBoundary | null {
+  const hit = clickedTextPosition(view.contentDOM, x, y)
+  if (!hit || !view.contentDOM.contains(hit.node)) return null
+  const el =
+    hit.node.nodeType === Node.TEXT_NODE
+      ? hit.node.parentElement
+      : hit.node instanceof Element
+        ? hit.node
+        : null
+  if (!el?.closest('.cm-line, .cm-mdw')) return null
+  return { node: hit.node, offset: hit.offset }
+}
+
+/** Whether boundary `b` comes after boundary `a` in the document. */
+function boundaryAfter(a: TextBoundary, b: TextBoundary): boolean {
+  try {
+    const range = document.createRange()
+    range.setStart(a.node, a.offset)
+    range.collapse(true)
+    return range.comparePoint(b.node, b.offset) >= 0
+  } catch {
+    return true
+  }
+}
+
+/** The screen rect of a collapsed DOM range (a caret), if it has a size. */
+function caretRectAt(boundary: TextBoundary | null): DOMRect | null {
+  if (!boundary) return null
+  try {
+    const range = document.createRange()
+    range.setStart(boundary.node, boundary.offset)
+    range.collapse(true)
+    const rect = range.getBoundingClientRect()
+    return rect.height || rect.width ? rect : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -447,27 +502,26 @@ function clickedCodePosition(e: MouseEvent, block: Block): number | null {
 }
 
 /**
- * Applies a change and keeps the clicked position stable. The block switches
- * between its rendered and its source form, which changes its height and
- * would move the text under the mouse.
+ * Applies a selection change that switches a block between its rendered and
+ * source form, keeping the clicked text under the pointer. Comparing the
+ * caret's own screen position before and after the switch (instead of using
+ * the mouse coordinate) means no scroll happens when both forms have the
+ * same metrics; blocks whose source form is taller (code, multi-line
+ * paragraphs) are compensated by exactly the height difference.
  *
- * The correction runs before the next paint, because CodeMirror corrects
- * the scroll position itself when the height of the document changes.
+ * The correction runs before the next paint; CodeMirror has measured the
+ * new layout by then.
  */
-function keepClickPosition(view: EditorView, e: MouseEvent, apply: () => void): void {
+function keepCaretPosition(
+  view: EditorView,
+  before: { top: number; bottom: number } | null,
+  apply: () => void
+): void {
   apply()
+  if (!before) return
   requestAnimationFrame(() => {
-    const head = view.state.selection.main.head
-    const dom = view.domAtPos(head)
-    const node = dom?.node
-    if (!node) return
-    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node
-    if (!(el instanceof Element)) return
-    const rect = el.getBoundingClientRect()
-    if (!rect.height) return
-    const delta = e.clientY - (rect.top + rect.bottom) / 2
-    if (!Number.isFinite(delta) || Math.abs(delta) < 1 || Math.abs(delta) > 400) return
-    view.scrollDOM.scrollTop += delta
+    const delta = caretScrollDelta(before, view.coordsAtPos(view.state.selection.main.head))
+    if (delta) view.scrollDOM.scrollTop += delta
   })
 }
 
@@ -579,6 +633,124 @@ function sourcePositionOfDom(
 }
 
 /**
+ * A mouse drag that starts in a source line and reaches rendered blocks.
+ *
+ * CodeMirror maps a point inside a block widget to the block's start or end,
+ * and `skipAtomsForSelection` snaps the selection endpoints to the widget's
+ * atomic range. The result is that dragging from the active block into the
+ * rendered text below selects whole blocks ("the selection lands on another
+ * line"). CodeMirror switches the blocks to source while dragging, so on
+ * mouseup the release point can be mapped precisely; the corrected range is
+ * dispatched after CodeMirror has finished its own handling.
+ */
+interface NativeDrag {
+  view: EditorView
+  anchor: number
+  x: number
+  y: number
+  lastX: number
+  lastY: number
+  moved: boolean
+  crossedWidget: boolean
+}
+
+let nativeDrag: NativeDrag | null = null
+let nativeDragMove: ((event: MouseEvent) => void) | null = null
+let nativeDragUp: ((event: MouseEvent) => void) | null = null
+
+function cancelNativeDrag(): void {
+  if (nativeDragMove) document.removeEventListener('mousemove', nativeDragMove, true)
+  if (nativeDragUp) document.removeEventListener('mouseup', nativeDragUp, true)
+  nativeDragMove = null
+  nativeDragUp = null
+  nativeDrag = null
+}
+
+if (typeof window !== 'undefined') window.addEventListener('blur', cancelNativeDrag)
+
+/** Whether the point is inside the current DOM selection (a text-move drag). */
+function pointInSelection(event: MouseEvent): boolean {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false
+  for (const rect of selection.getRangeAt(0).getClientRects()) {
+    if (
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function trackNativeDrag(view: EditorView, event: MouseEvent): void {
+  cancelNativeDrag()
+  // Word/line selections, extending and multi-range drags keep CodeMirror's
+  // own handling.
+  if (event.button !== 0 || event.detail > 1) return
+  if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+  if (pointInSelection(event)) return
+  const anchor = boundaryInEditor(view, event.clientX, event.clientY)
+  if (!anchor) return
+  const anchorPos = sourcePositionOfDom(view, anchor.node, anchor.offset, 'start')
+  if (anchorPos === null) return
+
+  nativeDrag = {
+    view,
+    anchor: anchorPos,
+    x: event.clientX,
+    y: event.clientY,
+    lastX: event.clientX,
+    lastY: event.clientY,
+    moved: false,
+    crossedWidget: false
+  }
+
+  const onMove = (move: MouseEvent): void => {
+    const drag = nativeDrag
+    if (!drag) return
+    drag.lastX = move.clientX
+    drag.lastY = move.clientY
+    if (!drag.moved && Math.hypot(move.clientX - drag.x, move.clientY - drag.y) > 3) {
+      drag.moved = true
+    }
+    if (!drag.crossedWidget) {
+      const el = document.elementFromPoint(move.clientX, move.clientY)
+      if (el?.closest('.cm-mdw')) drag.crossedWidget = true
+    }
+  }
+
+  const onUp = (up: MouseEvent): void => {
+    const drag = nativeDrag
+    cancelNativeDrag()
+    if (!drag || !drag.moved || !drag.crossedWidget) return
+    // Run after CodeMirror's mouseup handling and its DOM selection update.
+    setTimeout(() => correctNativeDrag(drag, up), 0)
+  }
+
+  nativeDragMove = onMove
+  nativeDragUp = onUp
+  document.addEventListener('mousemove', onMove, true)
+  document.addEventListener('mouseup', onUp, true)
+}
+
+function correctNativeDrag(drag: NativeDrag, up: MouseEvent): void {
+  const { view } = drag
+  if (!view.contentDOM.isConnected) return
+  const release =
+    boundaryInEditor(view, up.clientX, up.clientY) ?? boundaryInEditor(view, drag.lastX, drag.lastY)
+  if (!release) return
+  const forward = dragMovesForward(drag.x, drag.y, up.clientX, up.clientY)
+  const headPos = sourcePositionOfDom(view, release.node, release.offset, forward ? 'end' : 'start')
+  if (headPos === null || headPos === drag.anchor) return
+  const main = view.state.selection.main
+  if (main.anchor === drag.anchor && main.head === headPos) return
+  view.dispatch({ selection: { anchor: drag.anchor, head: headPos } })
+}
+
+/**
  * Map a native selection in the editor back to source offsets. The selection
  * may span one or more rendered widgets as well as source lines, which is what
  * a drag starting in a rendered block produces.
@@ -626,9 +798,9 @@ function handleWidgetMouseUp(e: MouseEvent, view: EditorView): void {
     pending.from,
     Number.isFinite(to) ? to : pending.from
   )
-  keepClickPosition(view, e, () => {
-    view.dispatch({ selection: EditorSelection.cursor(pos) })
-  })
+  // The table stays rendered, so there is no source/rendered switch to
+  // compensate for; scrolling here would move the table under the pointer.
+  view.dispatch({ selection: EditorSelection.cursor(pos) })
   view.focus()
 }
 
@@ -850,5 +1022,11 @@ export function tableKeyFor(state: EditorState, block: Block): string {
 export const liveRender = (): Extension => [
   liveRevField,
   EditorView.decorations.compute([docDirField, liveRevField, 'selection', 'doc'], buildDecorations),
-  EditorView.atomicRanges.of(() => lastAtomic)
+  EditorView.atomicRanges.of(() => lastAtomic),
+  EditorView.domEventHandlers({
+    mousedown(event, view): boolean {
+      trackNativeDrag(view, event)
+      return false
+    }
+  })
 ]

@@ -970,12 +970,43 @@ html[data-theme='dark-purple'] .window-control img {
 
 .cm-mdw {
   color: var(--md-text);
-  margin: 0 0 0.9em;
+  /* CodeMirror measures a block widget by its border box only — margins are
+     invisible to its height map. Keep the whole vertical footprint (including
+     the tails of child margins) inside the element, otherwise the height map
+     drifts from the real layout and mouse positions/scroll anchoring land on
+     the wrong line. */
+  display: flow-root;
+  margin: 0;
+  padding-bottom: 0.9em;
   line-height: var(--ed-line-height);
   word-break: break-word;
   /* The editor content uses `white-space: pre-wrap`; reset it here so the
      newlines produced by markdown-it do not create extra line boxes. */
   white-space: normal;
+}
+
+/* The widget's padding replaces the outer margin the last child used to
+   collapse into (the source form of an active block uses the same metrics). */
+.cm-mdw > :last-child,
+.cm-mdw li:last-child {
+  margin-bottom: 0;
+}
+
+/* Tables are already contained by their horizontal scroll box; keep their
+   original gap below the table. */
+.cm-mdw > table:last-child {
+  margin-bottom: 0.8em;
+}
+
+/* The source form of a list item has no extra top/bottom margin. */
+.cm-mdw li:first-child {
+  margin-top: 0;
+}
+
+/* An <hr> used to collapse its 1.2em bottom margin with the widget's 0.9em;
+   keep that spacing now that the margin lives inside the border box. */
+.cm-mdw > hr:last-child {
+  margin-bottom: 0.3em;
 }
 
 .cm-mdw pre {
