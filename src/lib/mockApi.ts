@@ -19,6 +19,7 @@ import type {
   ImageInsertRequest,
   ImageInsertResult,
   ImageExportOptions,
+  ImageSaveResult,
   MenuAction,
   PdfExportOptions,
   RecentFile,
@@ -134,16 +135,28 @@ export function createMockApi(): Api {
         /* ignore */
       }
     },
+    clipboardReadText: async (): Promise<string> => {
+      try {
+        return (await navigator.clipboard?.readText()) ?? ''
+      } catch {
+        return ''
+      }
+    },
+    editPaste: async (): Promise<boolean> => false,
     clipboardWriteHtml: async (_html: string, _text: string): Promise<void> => {},
     openExternal: async (url: string): Promise<void> => {
       window.open(url, '_blank', 'noopener')
     },
+    showItemInFolder: async (_path: string): Promise<void> => {},
     resolvePath: async (baseDir: string, relPath: string): Promise<string | null> => {
       if (/^https?:/i.test(relPath)) return relPath
       const base = baseDir.replace(/\\/g, '/').replace(/\/+$/, '')
       return `${base}/${relPath.replace(/^\.?\//, '')}`
     },
     insertImage: async (_req: ImageInsertRequest): Promise<ImageInsertResult | null> => null,
+    pickImage: async (): Promise<string | null> => null,
+    copyImage: async (_source: string): Promise<boolean> => false,
+    saveImageAs: async (_source: string): Promise<ImageSaveResult> => ({ path: null }),
     downloadImage: async (
       _url: string,
       _docPath: string | null,

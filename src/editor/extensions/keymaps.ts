@@ -62,7 +62,25 @@ export function setHeadingCommand(level: number): Command {
       processed.add(line.from)
       const m = RE_LINE_HEADING.exec(line.text)
       const hashes = '#'.repeat(level)
-      if (m) {
+      if (level === 0) {
+        // "Paragraph": drop an existing heading marker.
+        if (!m) {
+          plans.push({ changes: [], from: range.from, to: range.to, delta: 0 })
+          continue
+        }
+        const oldLen = m[1].length + m[2].length + (m[3] === '' ? 0 : 1)
+        const map = (p: number): number => {
+          if (p <= line.from) return p
+          if (p >= line.from + oldLen) return p - oldLen
+          return line.from
+        }
+        plans.push({
+          changes: [{ from: line.from, to: line.from + oldLen, insert: '' }],
+          from: map(range.from),
+          to: map(range.to),
+          delta: -oldLen
+        })
+      } else if (m) {
         const oldLen = m[1].length + m[2].length + (m[3] === '' ? 0 : 1)
         const insert = `${m[1]}${hashes} `
         const newLen = insert.length

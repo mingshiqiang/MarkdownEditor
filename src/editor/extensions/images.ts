@@ -62,6 +62,44 @@ async function insertFileImage(view: EditorView, file: File): Promise<void> {
   })
 }
 
+/**
+ * Insert pasted text with the editor's special cases: tab-separated text
+ * becomes a table and a URL pasted over a selection becomes a link.
+ * Returns false when the caller should insert the text normally.
+ */
+export function insertPastedText(view: EditorView, raw: string): boolean {
+  const text = raw.replace(/\r\n?/g, '\n')
+  if (!text) return false
+
+  if (text.includes('\t')) {
+    const table = textToTable(text)
+    if (table) {
+      const { from, to } = view.state.selection.main
+      const insert = view.state.sliceDoc(from, to) ? `\n\n${table}\n\n` : `${table}\n`
+      view.dispatch({
+        changes: { from, to, insert },
+        userEvent: 'input.paste.table'
+      })
+      return true
+    }
+  }
+
+  if (URL_RE.test(text.trim())) {
+    const url = text.trim()
+    const { from, to, empty } = view.state.selection.main
+    if (!empty) {
+      const label = view.state.sliceDoc(from, to)
+      view.dispatch({
+        changes: { from, to, insert: `[${label}](${url})` },
+        userEvent: 'input.paste.link'
+      })
+      return true
+    }
+  }
+
+  return false
+}
+
 export const editorDomHandlers: DOMEventHandlers<unknown> = {
   paste(event, view) {
     const dt = event.clipboardData
@@ -83,35 +121,11 @@ export const editorDomHandlers: DOMEventHandlers<unknown> = {
       return true
     }
 
-    // 2. Spreadsheet / tab separated text -> markdown table (Excel paste)
+    // 2./3. Spreadsheet table or URL-over-selection handling.
     const text = dt.getData('text/plain')
-    if (text && text.includes('\t')) {
-      const table = textToTable(text)
-      if (table) {
-        event.preventDefault()
-        const { from, to } = view.state.selection.main
-        const insert = view.state.sliceDoc(from, to) ? `\n\n${table}\n\n` : `${table}\n`
-        view.dispatch({
-          changes: { from, to, insert },
-          userEvent: 'input.paste.table'
-        })
-        return true
-      }
-    }
-
-    // 3. Plain URL pasted over a selection -> wrap as link (E-16)
-    if (text && URL_RE.test(text.trim())) {
-      const url = text.trim()
-      const { from, to, empty } = view.state.selection.main
-      if (!empty) {
-        event.preventDefault()
-        const label = view.state.sliceDoc(from, to)
-        view.dispatch({
-          changes: { from, to, insert: `[${label}](${url})` },
-          userEvent: 'input.paste.link'
-        })
-        return true
-      }
+    if (text && insertPastedText(view, text)) {
+      event.preventDefault()
+      return true
     }
 
     return false

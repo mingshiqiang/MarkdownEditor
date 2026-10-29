@@ -9,6 +9,7 @@ import {
   ClipboardItem,
   dialog,
   ipcMain,
+  nativeImage,
   nativeTheme,
   shell,
   type BrowserWindow
@@ -27,6 +28,7 @@ import type {
   ImageInsertRequest,
   ImageInsertResult,
   ImageExportOptions,
+  ImageSaveResult,
   RecentFile,
   SaveResult,
   SearchMatch,
@@ -55,6 +57,14 @@ import {
 } from './export'
 import { applySpellChecker } from './spellcheck'
 import { uploadImage } from './imageHost'
+import {
+  IMAGE_EXTENSIONS,
+  MIME_EXT,
+  imageFileName,
+  isRemoteImageSource,
+  mimeFromExtension,
+  sniffImageMime
+} from './imageSource'
 import { readTextFile, writeTextFileAtomic } from './fileIo'
 import { readTableLayout, writeTableLayout } from './tableLayout'
 import { checkForUpdates } from './updater'
@@ -293,6 +303,15 @@ function registerMiscHandlers(): void {
     return Promise.resolve()
   })
 
+  ipcMain.handle(IPC.ClipboardReadText, (): Promise<string> => {
+    return Promise.resolve(clipboard.readText())
+  })
+
+  ipcMain.handle(IPC.ShellShowItemInFolder, (_e, filePath: unknown): Promise<void> => {
+    if (isStr(filePath)) shell.showItemInFolder(path.normalize(filePath))
+    return Promise.resolve()
+  })
+
   ipcMain.handle(IPC.ClipboardWriteHtml, (_e, html: unknown, text: unknown): Promise<void> => {
     if (typeof html !== 'string') return Promise.resolve()
     clipboard.write([
@@ -322,16 +341,6 @@ function registerMiscHandlers(): void {
 }
 
 /* ---------------------------------- images --------------------------------- */
-
-const MIME_EXT: Record<string, string> = {
-  'image/png': '.png',
-  'image/jpeg': '.jpg',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-  'image/bmp': '.bmp',
-  'image/avif': '.avif',
-  'image/svg+xml': '.svg'
-}
 
 function timestampName(ext: string): string {
   const d = new Date()
@@ -385,7 +394,59 @@ function storeImageBytes(
   return { absPath: target, mdPath }
 }
 
-function registerImageHandlers(): void {
+function registerImageHandlers(getWin: () => BrowserWindow | null): void {
+  ipcMain.handle(IPC.ImagePick, async (): Promise<string | null> => {
+    const win = getWin()
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: IMAGE_EXTENSIONS }]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(IPC.ImageCopyToClipboard, async (_e, source: unknown): Promise<boolean> => {
+    if (!isStr(source)) return false
+    try {
+      const image = await loadImageForClipboard(source)
+      if (!image || image.isEmpty()) return false
+      // Electron 44 uses the W3C-style clipboard API (no writeImage).
+      const png = image.toPNG()
+      await clipboard.write([
+        new ClipboardItem({
+          'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' })
+        })
+      ])
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle(IPC.ImageSaveAs, async (_e, source: unknown): Promise<ImageSaveResult> => {
+    if (!isStr(source)) return { path: null, error: 'invalid source' }
+    try {
+      const loaded = await readImageSource(source)
+      if (!loaded) return { path: null, error: 'not found' }
+      const name = imageFileName(loaded.fileName, loaded.contentType)
+      const options: Electron.SaveDialogOptions = {
+        defaultPath: path.join(picturesDirectory(), name),
+        filters: [{ name: 'Images', extensions: IMAGE_EXTENSIONS }]
+      }
+      const win = getWin()
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
+      if (result.canceled || !result.filePath) return { path: null }
+      fs.writeFileSync(result.filePath, loaded.bytes)
+      return { path: result.filePath }
+    } catch (err) {
+      return { path: null, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   ipcMain.handle(IPC.ImageInsert, (_e, req: unknown): Promise<ImageInsertResult | null> => {
     if (typeof req !== 'object' || req === null) return Promise.resolve(null)
     const r = req as ImageInsertRequest
@@ -452,6 +513,55 @@ function registerImageHandlers(): void {
       return uploadImage(path.normalize(filePath), s)
     }
   )
+}
+
+function picturesDirectory(): string {
+  try {
+    return app.getPath('pictures')
+  } catch {
+    try {
+      return app.getPath('documents')
+    } catch {
+      return app.getPath('home')
+    }
+  }
+}
+
+/** Load a local or remote image as a nativeImage for the clipboard. */
+async function loadImageForClipboard(source: string): Promise<Electron.NativeImage | null> {
+  if (isRemoteImageSource(source)) {
+    const { bytes } = await downloadUrl(source)
+    return nativeImage.createFromBuffer(bytes)
+  }
+  const abs = path.normalize(source)
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return null
+  const image = nativeImage.createFromPath(abs)
+  if (!image.isEmpty()) return image
+  return nativeImage.createFromBuffer(fs.readFileSync(abs))
+}
+
+/** Read image bytes + metadata for "Save Image As". */
+async function readImageSource(
+  source: string
+): Promise<{ bytes: Buffer; contentType: string; fileName: string } | null> {
+  if (isRemoteImageSource(source)) {
+    const { bytes, contentType } = await downloadUrl(source)
+    let fileName = 'image'
+    try {
+      fileName = path.basename(decodeURIComponent(new URL(source).pathname)) || 'image'
+    } catch {
+      /* keep the fallback name */
+    }
+    return { bytes, contentType: contentType || sniffImageMime(bytes), fileName }
+  }
+  const abs = path.normalize(source)
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return null
+  const bytes = fs.readFileSync(abs)
+  return {
+    bytes,
+    contentType: mimeFromExtension(path.extname(abs)) || sniffImageMime(bytes),
+    fileName: path.basename(abs)
+  }
 }
 
 /** Download an http(s) resource. */
@@ -643,6 +753,13 @@ function registerLifecycleHandlers(getWin: () => BrowserWindow | null): void {
     return Promise.resolve()
   })
 
+  ipcMain.handle(IPC.EditPaste, (): Promise<boolean> => {
+    const w = getWin()
+    if (!w || w.isDestroyed()) return Promise.resolve(false)
+    w.webContents.paste()
+    return Promise.resolve(true)
+  })
+
   ipcMain.handle(IPC.WindowMinimize, (): Promise<void> => {
     const w = getWin()
     if (w && !w.isDestroyed()) w.minimize()
@@ -703,7 +820,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   registerFileHandlers()
   registerSettingsHandlers()
   registerMiscHandlers()
-  registerImageHandlers()
+  registerImageHandlers(ctx.getWin)
   registerExportHandlers()
   registerSnapshotHandlers()
   registerWorkspaceHandlers()

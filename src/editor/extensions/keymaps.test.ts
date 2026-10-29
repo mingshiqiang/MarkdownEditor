@@ -57,6 +57,18 @@ describe('setHeadingCommand', () => {
     setHeadingCommand(3)(view)
     expect(view.state.doc.toString()).toBe('### hello')
   })
+
+  it('turns a heading back into a paragraph', () => {
+    const view = makeView('## hello')
+    setHeadingCommand(0)(view)
+    expect(view.state.doc.toString()).toBe('hello')
+  })
+
+  it('leaves a paragraph unchanged at level 0', () => {
+    const view = makeView('hello')
+    setHeadingCommand(0)(view)
+    expect(view.state.doc.toString()).toBe('hello')
+  })
 })
 
 describe('insertTableCommand', () => {

@@ -9,6 +9,7 @@ import { useDocumentsStore } from './stores/documents'
 import { useSettingsStore } from './stores/settings'
 import { useWorkspaceStore } from './stores/workspace'
 import { setOpenDocFn, setToastFn, toast } from './lib/bus'
+import { closeContextMenu, contextMenu } from './lib/contextMenu'
 import { t, tf } from './lib/i18n'
 import { matchAppShortcut } from './lib/shortcuts'
 import { applyUserTheme } from './lib/userTheme'
@@ -24,6 +25,7 @@ import SettingsDialog from './components/SettingsDialog.vue'
 import Sidebar from './components/Sidebar.vue'
 import ExportDialog from './components/ExportDialog.vue'
 import Modal from './components/Modal.vue'
+import ContextMenu from './components/ContextMenu.vue'
 
 const documents = useDocumentsStore()
 const settings = useSettingsStore()
@@ -759,5 +761,16 @@ onBeforeUnmount(() => {
     <transition name="toast">
       <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
     </transition>
+
+    <Teleport to="body">
+      <ContextMenu
+        v-if="contextMenu.open"
+        :key="contextMenu.rev"
+        :items="contextMenu.items"
+        :x="contextMenu.x"
+        :y="contextMenu.y"
+        @close="closeContextMenu()"
+      />
+    </Teleport>
   </div>
 </template>

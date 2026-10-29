@@ -9,6 +9,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { AppMenuId } from '../../shared/types'
 import { useDocumentsStore } from '../stores/documents'
+import { openContextMenu, type ContextMenuItem } from '../lib/contextMenu'
 import { t } from '../lib/i18n'
 import logoUrl from '../assets/icon.png'
 import minimizeIcon from '../../resources/min.png'
@@ -56,6 +57,22 @@ async function closeWindow(): Promise<void> {
   await window.api.windowClose()
 }
 
+/** Windows-style system menu on the caption area. */
+function onTitleContextMenu(event: MouseEvent): void {
+  event.preventDefault()
+  const items: ContextMenuItem[] = [
+    {
+      id: 'restore',
+      label: maximized.value ? t('ui.restore') : t('ui.maximize'),
+      action: () => toggleMaximize()
+    },
+    { id: 'minimize', label: t('ui.minimize'), action: () => minimizeWindow() },
+    { separator: true },
+    { id: 'close', label: t('ui.close'), danger: true, action: () => closeWindow() }
+  ]
+  openContextMenu(event, items)
+}
+
 async function openMenu(menu: AppMenuId, event: MouseEvent): Promise<void> {
   event.preventDefault()
   event.stopPropagation()
@@ -75,7 +92,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="title-bar" :class="{ maximized }" @dblclick="toggleMaximize">
+  <header
+    class="title-bar"
+    :class="{ maximized }"
+    @dblclick="toggleMaximize"
+    @contextmenu.prevent="onTitleContextMenu"
+  >
     <div class="title-brand">
       <img :src="logoUrl" alt="MarkdownEditor" class="title-logo" />
     </div>

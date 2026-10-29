@@ -17,6 +17,7 @@ import type {
   ImageInsertRequest,
   ImageInsertResult,
   ImageExportOptions,
+  ImageSaveResult,
   MenuAction,
   PdfExportOptions,
   RecentFile,
@@ -68,14 +69,23 @@ const api: Api = {
   // misc
   clipboardWriteText: (text: string) =>
     ipcRenderer.invoke(IPC.ClipboardWriteText, text) as Promise<void>,
+  clipboardReadText: () => ipcRenderer.invoke(IPC.ClipboardReadText) as Promise<string>,
+  editPaste: () => ipcRenderer.invoke(IPC.EditPaste) as Promise<boolean>,
   clipboardWriteHtml: (html: string, text: string) =>
     ipcRenderer.invoke(IPC.ClipboardWriteHtml, html, text) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.ShellOpenExternal, url) as Promise<void>,
+  showItemInFolder: (path: string) =>
+    ipcRenderer.invoke(IPC.ShellShowItemInFolder, path) as Promise<void>,
   resolvePath: (baseDir: string, relPath: string) =>
     ipcRenderer.invoke(IPC.UtilResolvePath, baseDir, relPath) as Promise<string | null>,
   // images
   insertImage: (req: ImageInsertRequest) =>
     ipcRenderer.invoke(IPC.ImageInsert, req) as Promise<ImageInsertResult | null>,
+  pickImage: () => ipcRenderer.invoke(IPC.ImagePick) as Promise<string | null>,
+  copyImage: (source: string) =>
+    ipcRenderer.invoke(IPC.ImageCopyToClipboard, source) as Promise<boolean>,
+  saveImageAs: (source: string) =>
+    ipcRenderer.invoke(IPC.ImageSaveAs, source) as Promise<ImageSaveResult>,
   downloadImage: (url: string, docPath: string | null, settings: AppSettings) =>
     ipcRenderer.invoke(
       IPC.ImageDownload,

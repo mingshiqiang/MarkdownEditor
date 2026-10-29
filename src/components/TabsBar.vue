@@ -3,8 +3,9 @@
  * TabsBar (F-04): multiple documents, click/middle-click, drag reorder,
  * per-tab dirty dot, context menu (close / close others / close right).
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useDocumentsStore } from '../stores/documents'
+import { openContextMenu, type ContextMenuItem } from '../lib/contextMenu'
+import { toast } from '../lib/bus'
 import { t } from '../lib/i18n'
 
 const documents = useDocumentsStore()
@@ -51,33 +52,39 @@ function onTabDown(id: string, e: MouseEvent): void {
 
 /* ------------------------------ context menu ------------------------------- */
 
-const ctx = ref<{ x: number; y: number; id: string } | null>(null)
-
 function onContextMenu(id: string, e: MouseEvent): void {
   e.preventDefault()
-  ctx.value = { x: e.clientX, y: e.clientY, id }
+  const tab = documents.tabs.find((x) => x.id === id)
+  if (!tab) return
+  const items: ContextMenuItem[] = [
+    { id: 'close', label: t('ui.closeTab'), action: () => emit('close', id) },
+    { id: 'close-others', label: t('ui.closeOthers'), action: () => emit('close-others', id) },
+    { id: 'close-right', label: t('ui.closeRight'), action: () => emit('close-right', id) }
+  ]
+  if (tab.path) {
+    items.push(
+      { separator: true },
+      {
+        id: 'copy-path',
+        label: t('ctx.copyPath'),
+        action: () => {
+          void window.api.clipboardWriteText(tab.path as string)
+          toast(t('ui.copied'))
+        }
+      },
+      {
+        id: 'reveal',
+        label: t('ctx.revealInExplorer'),
+        action: () => window.api.showItemInFolder(tab.path as string)
+      }
+    )
+  }
+  items.push(
+    { separator: true },
+    { id: 'new', label: t('ui.newTab'), action: () => emit('new-tab') }
+  )
+  openContextMenu(e, items)
 }
-
-function closeCtx(): void {
-  ctx.value = null
-}
-
-function ctxAction(action: 'close' | 'close-others' | 'close-right' | 'new'): void {
-  const c = ctx.value
-  ctx.value = null
-  if (!c) return
-  if (action === 'close') emit('close', c.id)
-  else if (action === 'close-others') emit('close-others', c.id)
-  else if (action === 'close-right') emit('close-right', c.id)
-  else emit('new-tab')
-}
-
-onMounted(() => {
-  window.addEventListener('mousedown', closeCtx, { capture: true })
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('mousedown', closeCtx, { capture: true } as EventListenerOptions)
-})
 </script>
 
 <template>
@@ -110,19 +117,5 @@ onBeforeUnmount(() => {
     <button type="button" class="tab-new" :title="t('ui.newTab')" @click="emit('new-tab')">
       ＋
     </button>
-
-    <teleport to="body">
-      <div
-        v-if="ctx"
-        class="ctx-menu"
-        :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
-        @mousedown.stop
-      >
-        <button type="button" @click="ctxAction('close')">{{ t('ui.closeTab') }}</button>
-        <button type="button" @click="ctxAction('close-others')">{{ t('ui.closeOthers') }}</button>
-        <button type="button" @click="ctxAction('close-right')">{{ t('ui.closeRight') }}</button>
-        <button type="button" @click="ctxAction('new')">{{ t('ui.newTab') }}</button>
-      </div>
-    </teleport>
   </div>
 </template>

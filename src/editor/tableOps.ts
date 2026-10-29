@@ -28,6 +28,7 @@ export type TableOp =
   | { kind: 'col-move'; dir: -1 | 1 }
   | { kind: 'align'; align: Align }
   | { kind: 'reset-widths' }
+  | { kind: 'table-remove' }
 
 export interface TableContext {
   block: Block
@@ -66,6 +67,8 @@ export function computeTableText(ctx: TableContext, op: TableOp): string | null 
     }
     case 'align':
       return setColumnAlign(table, cell.col, op.align)
+    case 'table-remove':
+      return ''
     default:
       return null
   }

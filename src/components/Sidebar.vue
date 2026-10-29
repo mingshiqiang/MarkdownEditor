@@ -9,6 +9,8 @@ import { useWorkspaceStore, type SidebarView } from '../stores/workspace'
 import FileTree from './FileTree.vue'
 import OutlineView from './OutlineView.vue'
 import SearchPanel from './SearchPanel.vue'
+import { openContextMenu, type ContextMenuItem } from '../lib/contextMenu'
+import { toast } from '../lib/bus'
 import { t, tf } from '../lib/i18n'
 
 const workspace = useWorkspaceStore()
@@ -20,7 +22,6 @@ const emit = defineEmits<{
 }>()
 
 const view = ref<SidebarView>('files')
-const menu = ref<{ x: number; y: number; node: FileTreeNode | null } | null>(null)
 
 const views: { id: SidebarView; label: string }[] = [
   { id: 'files', label: 'ui.sidebarFiles' },
@@ -30,54 +31,111 @@ const views: { id: SidebarView; label: string }[] = [
 
 const treeEmpty = computed(() => !workspace.root)
 
-function onContextMenu(payload: { event: MouseEvent; node: FileTreeNode }): void {
-  menu.value = { x: payload.event.clientX, y: payload.event.clientY, node: payload.node }
+function parentDir(filePath: string): string {
+  const posix = filePath.replace(/\\/g, '/')
+  const idx = posix.lastIndexOf('/')
+  return idx > 0 ? posix.slice(0, idx) : (workspace.root ?? '')
 }
 
-function closeMenu(): void {
-  menu.value = null
-}
-
-function renameFromMenu(): void {
-  closeMenu()
-  startRename()
-}
-
-function deleteFromMenu(): void {
-  closeMenu()
-  void remove()
+async function createIn(parent: string, type: 'file' | 'directory'): Promise<void> {
+  if (!parent) return
+  const name = window.prompt(
+    type === 'file' ? t('ui.newFileName') : t('ui.newFolderName'),
+    type === 'file' ? 'untitled.md' : 'new-folder'
+  )
+  if (!name) return
+  const ok = await workspace.createEntry(parent, name, type)
+  if (ok) workspace.expanded.add(parent)
 }
 
 async function newFile(): Promise<void> {
-  const parent = workspace.root
-  if (!parent) return
-  const name = window.prompt(t('ui.newFileName'), 'untitled.md')
-  if (!name) return
-  await workspace.createEntry(parent, name, 'file')
+  await createIn(workspace.root ?? '', 'file')
 }
 
 async function newFolder(): Promise<void> {
-  const parent = workspace.root
-  if (!parent) return
-  const name = window.prompt(t('ui.newFolderName'), 'new-folder')
-  if (!name) return
-  await workspace.createEntry(parent, name, 'directory')
+  await createIn(workspace.root ?? '', 'directory')
 }
 
-function startRename(): void {
-  const node = menu.value?.node
-  if (!node) return
-  closeMenu()
-  workspace.startRename(node.path, node.name)
-}
-
-async function remove(): Promise<void> {
-  const node = menu.value?.node
-  closeMenu()
-  if (!node) return
+async function removeNode(node: FileTreeNode): Promise<void> {
   const ok = window.confirm(tf('ui.deleteConfirm', { name: node.name }))
   if (!ok) return
   await workspace.deleteEntry(node.path)
+}
+
+function copyPath(path: string): void {
+  void window.api.clipboardWriteText(path)
+  toast(t('ui.copied'))
+}
+
+function fileTreeMenu(node: FileTreeNode): ContextMenuItem[] {
+  const parent = node.type === 'directory' ? node.path : parentDir(node.path)
+  return [
+    {
+      id: 'new-file',
+      label: t('ctx.newFileHere'),
+      action: () => createIn(parent, 'file')
+    },
+    {
+      id: 'new-folder',
+      label: t('ctx.newFolderHere'),
+      action: () => createIn(parent, 'directory')
+    },
+    { separator: true },
+    {
+      id: 'rename',
+      label: t('ui.rename'),
+      action: () => workspace.startRename(node.path, node.name)
+    },
+    {
+      id: 'delete',
+      label: t('ui.delete'),
+      danger: true,
+      action: () => removeNode(node)
+    },
+    { separator: true },
+    {
+      id: 'copy-path',
+      label: t('ctx.copyPath'),
+      action: () => copyPath(node.path)
+    },
+    {
+      id: 'reveal',
+      label: t('ctx.revealInExplorer'),
+      action: () => window.api.showItemInFolder(node.path)
+    },
+    { separator: true },
+    {
+      id: 'refresh',
+      label: t('ctx.refresh'),
+      action: () => workspace.refresh()
+    }
+  ]
+}
+
+function onContextMenu(payload: { event: MouseEvent; node: FileTreeNode }): void {
+  openContextMenu(payload.event, fileTreeMenu(payload.node))
+}
+
+function onRootContextMenu(event: MouseEvent): void {
+  event.preventDefault()
+  openContextMenu(event, [
+    {
+      id: 'new-file',
+      label: t('ctx.newFileHere'),
+      action: () => newFile()
+    },
+    {
+      id: 'new-folder',
+      label: t('ctx.newFolderHere'),
+      action: () => newFolder()
+    },
+    { separator: true },
+    {
+      id: 'refresh',
+      label: t('ctx.refresh'),
+      action: () => workspace.refresh()
+    }
+  ])
 }
 </script>
 
@@ -125,7 +183,11 @@ async function remove(): Promise<void> {
           </button>
         </div>
         <template v-else>
-          <div class="workspace-root" :title="workspace.root ?? ''">
+          <div
+            class="workspace-root"
+            :title="workspace.root ?? ''"
+            @contextmenu.prevent="onRootContextMenu"
+          >
             📁 {{ workspace.rootName }}
           </div>
           <FileTree
@@ -150,21 +212,5 @@ async function remove(): Promise<void> {
         <SearchPanel @open-result="(m) => emit('open-result', m)" />
       </div>
     </div>
-
-    <teleport to="body">
-      <div
-        v-if="menu"
-        class="ctx-menu"
-        :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
-        @mousedown.stop
-      >
-        <button type="button" @click="renameFromMenu">
-          {{ t('ui.rename') }}
-        </button>
-        <button type="button" @click="deleteFromMenu">
-          {{ t('ui.delete') }}
-        </button>
-      </div>
-    </teleport>
   </aside>
 </template>

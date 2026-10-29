@@ -157,6 +157,12 @@ export interface ImageInsertResult {
   mdPath: string
 }
 
+/** Result of "Save Image As": null path + no error means the user cancelled. */
+export interface ImageSaveResult {
+  path: string | null
+  error?: string
+}
+
 /* --------------------------------- events -------------------------------- */
 
 /** Actions sent from the native menu / window key handler to the renderer. */
@@ -303,13 +309,19 @@ export const IPC = {
   UpdateCheck: 'update:check',
   UpdateEvent: 'update:event',
   ClipboardWriteText: 'clipboard:write-text',
+  ClipboardReadText: 'clipboard:read-text',
   ClipboardWriteHtml: 'clipboard:write-html',
+  EditPaste: 'edit:paste',
   ShellOpenExternal: 'shell:open-external',
+  ShellShowItemInFolder: 'shell:show-item-in-folder',
   UtilResolvePath: 'util:resolve-path',
   // images
   ImageInsert: 'image:insert',
   ImageDownload: 'image:download',
   ImageUpload: 'image:upload',
+  ImagePick: 'image:pick',
+  ImageCopyToClipboard: 'image:copy-to-clipboard',
+  ImageSaveAs: 'image:save-as',
   // user themes (U-02)
   ThemesList: 'themes:list',
   ThemesOpenFolder: 'themes:open-folder',
@@ -364,12 +376,24 @@ export interface Api {
   setAcceleratorsSuspended(suspended: boolean): Promise<void>
   // misc
   clipboardWriteText(text: string): Promise<void>
+  /** Read plain text from the system clipboard (context-menu paste). */
+  clipboardReadText(): Promise<string>
+  /** Let Chromium paste into the focused editor (images, tables, HTML). */
+  editPaste(): Promise<boolean>
   /** Copy rich text (HTML) with a plain text fallback (X-05). */
   clipboardWriteHtml(html: string, text: string): Promise<void>
   openExternal(url: string): Promise<void>
+  /** Reveal a file in Explorer/Finder (file tree & image context menus). */
+  showItemInFolder(path: string): Promise<void>
   resolvePath(baseDir: string, relPath: string): Promise<string | null>
   // images
   insertImage(req: ImageInsertRequest): Promise<ImageInsertResult | null>
+  /** Pick an image file for insertion (context menu). */
+  pickImage(): Promise<string | null>
+  /** Copy a local image path or remote image URL to the system clipboard. */
+  copyImage(source: string): Promise<boolean>
+  /** Save a local image path or remote image URL through a save dialog. */
+  saveImageAs(source: string): Promise<ImageSaveResult>
   /** Download a remote image and store it locally (E-09). */
   downloadImage(
     url: string,

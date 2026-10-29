@@ -2167,31 +2167,97 @@ button.sb-click:hover {
 
 /* ------------------------------ context menu ------------------------------- */
 
-.ctx-menu {
+.ctx-panel {
   position: fixed;
-  z-index: 200;
+  z-index: 400;
+  min-width: 210px;
+  max-height: calc(100vh - 12px);
+  overflow-y: auto;
+  padding: 4px;
+  color: var(--fg);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.25);
-  padding: 4px;
-  min-width: 170px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  outline: none;
+  user-select: none;
 }
 
-.ctx-menu button {
-  display: block;
+.ctx-panel-sub {
+  z-index: 401;
+}
+
+.ctx-entry {
+  position: relative;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
-  text-align: left;
-  border: none;
-  background: none;
-  padding: 6px 10px;
-  border-radius: 3px;
+  padding: 5px 8px;
+  color: var(--fg);
   font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: default;
 }
 
-.ctx-menu button:hover {
-  background: var(--accent-soft);
+.ctx-item:hover:not(:disabled),
+.ctx-item.active:not(:disabled) {
   color: var(--fg);
+  background: var(--accent-soft);
+}
+
+.ctx-item:disabled {
+  color: var(--fg-subtle);
+  opacity: 0.55;
+}
+
+.ctx-item.danger {
+  color: var(--danger);
+}
+
+.ctx-check {
+  flex: none;
+  width: 14px;
+  color: var(--accent);
+  font-size: 12px;
+  text-align: center;
+}
+
+.ctx-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctx-shortcut {
+  flex: none;
+  margin-left: 20px;
+  color: var(--fg-subtle);
+  font-family: var(--ed-mono-font-family);
+  font-size: 11px;
+}
+
+.ctx-arrow {
+  flex: none;
+  width: 12px;
+  margin-left: 8px;
+  color: var(--fg-subtle);
+  text-align: right;
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
 }
 
 /* --------------------------------- toast ----------------------------------- */

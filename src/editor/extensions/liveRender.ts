@@ -120,6 +120,8 @@ class MarkdownBlockWidget extends WidgetType {
     div.className = `cm-mdw cm-mdw-${block.type}`
     if (block.type === 'heading' && block.level) div.classList.add(`cm-mdw-h${block.level}`)
     div.dataset.block = block.type
+    div.dataset.from = String(block.from)
+    div.dataset.to = String(block.to)
     div.innerHTML = renderBlockSource(block, env)
 
     // Task checkboxes: enable interaction (rendered disabled by default).
@@ -178,6 +180,10 @@ function handleWidgetMouseDown(
   block: Block,
   parsedTable: ParsedTable | null
 ): void {
+  // Keep the current selection for the context menu. A left click enters the
+  // block (reveals source); a right click must not collapse a rendered
+  // selection before the context-menu handler can copy/format it.
+  if (e.button !== 0) return
   const target = e.target as HTMLElement
 
   // Language dropdown of a code block: handled by the select itself.
@@ -332,6 +338,50 @@ function clickedSourcePosition(
       ? map.sourceIndex[map.sourceIndex.length - 1] + 1
       : map.sourceIndex[textOffset]
   return Math.min(end, base + sourceOffset)
+}
+
+/** Source position of a right-click inside a rendered block. */
+export function sourcePositionAt(view: EditorView, event: MouseEvent): number | null {
+  const target = event.target as HTMLElement | null
+  const widget = target?.closest('.cm-mdw') as HTMLElement | null
+  if (!widget) return null
+  const from = Number(widget.dataset.from)
+  const to = Number(widget.dataset.to)
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null
+  return clickedSourcePosition(view, widget, event, from, to)
+}
+
+/**
+ * Map a text selection inside a rendered widget back to source offsets, so
+ * the context menu can format/cut rendered selections. Returns false when
+ * there is no selection inside the widget (the caller may then place a caret).
+ */
+export function captureRenderedSelection(view: EditorView, event: MouseEvent): boolean {
+  const target = event.target as HTMLElement | null
+  const widget = target?.closest('.cm-mdw') as HTMLElement | null
+  if (!widget || widget.dataset.block === 'table') return false
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
+  const anchor = selection.anchorNode
+  const focus = selection.focusNode
+  if (!anchor || !focus || !widget.contains(anchor) || !widget.contains(focus)) return false
+  const base = Number(widget.dataset.from)
+  const end = Number(widget.dataset.to)
+  if (!Number.isFinite(base) || !Number.isFinite(end)) return false
+  const source = view.state.sliceDoc(base, end)
+  const options = { atomicMath: true }
+  const anchorOffset = textOffsetIn(widget, anchor, selection.anchorOffset, options)
+  const focusOffset = textOffsetIn(widget, focus, selection.focusOffset, options)
+  if (anchorOffset < 0 || focusOffset < 0) return false
+  const range = sourceRangeOfTextRange(
+    source,
+    base,
+    Math.min(anchorOffset, focusOffset),
+    Math.max(anchorOffset, focusOffset)
+  )
+  if (!range) return false
+  view.dispatch({ selection: { anchor: range.from, head: range.to } })
+  return true
 }
 
 /**
