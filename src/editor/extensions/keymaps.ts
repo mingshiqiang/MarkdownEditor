@@ -1,7 +1,7 @@
 /**
  * Editor commands & keymap (E-03/E-04/E-05/E-16):
  * headings Ctrl+1..6, mark toggles (bold/italic/strike/highlight/code/math),
- * link & table insertion, list item indent/dedent via Tab/Shift+Tab.
+ * link & table insertion, list item and fenced-code indent/dedent via Tab/Shift+Tab.
  * The key bindings come from the user's keymap (shared/keymap.ts).
  *
  * Note on selections: `state.changeByRange` uses the range returned for the
@@ -12,7 +12,8 @@
 import { EditorSelection } from '@codemirror/state'
 import type { EditorState, SelectionRange, ChangeSpec } from '@codemirror/state'
 import { EditorView, type Command } from '@codemirror/view'
-import { segmentDoc } from '../segmenter'
+import { indentUnit } from '@codemirror/language'
+import { segmentDoc, type Block } from '../segmenter'
 import { cellSelection } from '../cellSelection'
 import type { KeyActionId } from '../../../shared/keymap'
 import { matchEditorShortcut } from '../../lib/shortcuts'
@@ -222,6 +223,98 @@ export function indentListItem(dir: 1 | -1): Command {
   }
 }
 
+/* ------------------------------- code indent ------------------------------- */
+
+/** A bare fence marker (opening or closing line of a code block). */
+function isFenceMarker(text: string): boolean {
+  return /^ {0,3}(`{3,}|~{3,})[ \t]*$/.test(text)
+}
+
+/** The line range of the code inside a fence (the markers stay in place). */
+function fenceCodeLines(state: EditorState, block: Block): { first: number; last: number } {
+  const closed = isFenceMarker(state.doc.line(block.lineTo).text)
+  return { first: block.lineFrom + 1, last: closed ? block.lineTo - 1 : block.lineTo }
+}
+
+/** Removes one indentation unit from a line (null when there is none). */
+function outdentChange(
+  state: EditorState,
+  line: { from: number; text: string }
+): ChangeSpec | null {
+  const whitespace = /^[ \t]+/.exec(line.text)?.[0]
+  if (!whitespace) return null
+  const unit = state.facet(indentUnit)
+  const remove = whitespace.startsWith(unit) ? unit.length : 1
+  return { from: line.from, to: line.from + remove, insert: '' }
+}
+
+/**
+ * Tab / Shift+Tab inside a fenced code block: indents or outdents the selected
+ * code lines, or inserts/removes one unit at the caret. The fence markers are
+ * never indented, and the key is consumed even when nothing can be outdented
+ * so that Tab never moves the focus out of the editor.
+ */
+export function indentCodeBlock(dir: 1 | -1): Command {
+  return (view: EditorView): boolean => {
+    const state: EditorState = view.state
+    const main = state.selection.main
+    const block = segmentDoc(state.doc).find(
+      (b) => b.type === 'fence' && main.from <= b.to && main.to >= b.from
+    )
+    if (!block) return false
+
+    const unit = state.facet(indentUnit)
+    const { first, last } = fenceCodeLines(state, block)
+    const changes: ChangeSpec[] = []
+    /** Set when the caret must move past the inserted unit explicitly. */
+    let caretAfterInsert: number | null = null
+
+    if (main.empty) {
+      const line = state.doc.lineAt(main.head)
+      if (line.number < first || line.number > last) return true
+      if (dir > 0) {
+        changes.push({ from: main.head, insert: unit })
+        caretAfterInsert = main.head + unit.length
+      } else {
+        const change = outdentChange(state, line)
+        if (change) changes.push(change)
+      }
+    } else {
+      let startLine = state.doc.lineAt(main.from).number
+      let endLine = state.doc.lineAt(main.to).number
+      // A selection ending at a line start does not include that line.
+      if (endLine > startLine && state.doc.line(endLine).from === main.to) endLine--
+      startLine = Math.max(startLine, first)
+      endLine = Math.min(endLine, last)
+      for (let ln = startLine; ln <= endLine; ln++) {
+        const line = state.doc.line(ln)
+        if (dir > 0) {
+          changes.push({ from: line.from, insert: unit })
+        } else {
+          const change = outdentChange(state, line)
+          if (change) changes.push(change)
+        }
+      }
+    }
+
+    if (changes.length) {
+      view.dispatch({
+        changes,
+        selection: caretAfterInsert !== null ? EditorSelection.cursor(caretAfterInsert) : undefined,
+        userEvent: 'input.indent.code'
+      })
+    }
+    return true
+  }
+}
+
+/** Tab / Shift+Tab: code blocks first, then list items. */
+export function indentBlock(dir: 1 | -1): Command {
+  const code = indentCodeBlock(dir)
+  const list = indentListItem(dir)
+  return (view: EditorView): boolean => code(view) || list(view)
+}
+
 /* --------------------------------- keymap ---------------------------------- */
 
 /**
@@ -285,8 +378,8 @@ const editorCommands: Partial<Record<KeyActionId, Command>> = {
   'markdown:code': toggleMarker('`'),
   'markdown:link': insertLinkCommand,
   'markdown:table': insertTableCommand,
-  'markdown:indent': indentListItem(1),
-  'markdown:outdent': indentListItem(-1)
+  'markdown:indent': indentBlock(1),
+  'markdown:outdent': indentBlock(-1)
 }
 
 /**

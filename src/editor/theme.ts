@@ -17,12 +17,17 @@ export const editorTheme = EditorView.theme({
     fontFamily: 'var(--ed-font-family)',
     lineHeight: 'var(--ed-line-height)',
     overflowY: 'auto',
-    overflowX: 'hidden'
+    overflowX: 'hidden',
+    // The horizontal gutter must not live on `.cm-content`: CodeMirror draws
+    // selection rectangles from the content box edge plus the first line's
+    // padding, which would make full-line selections spill out of blocks with
+    // their own background (e.g. code blocks).
+    padding: '0 24px'
   },
   '.cm-content': {
-    maxWidth: 'var(--ed-max-width)',
+    maxWidth: 'calc(var(--ed-max-width) - 48px)',
     margin: '0 auto',
-    padding: '24px 24px 40vh 24px',
+    padding: '24px 0 40vh 0',
     caretColor: 'var(--ed-caret)',
     width: '100%'
   },

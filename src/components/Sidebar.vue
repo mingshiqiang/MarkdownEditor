@@ -3,9 +3,10 @@
  * Sidebar (M3): workspace file tree, outline and search in one collapsible
  * panel with three views.
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import type { FileTreeNode, SearchMatch } from '../../shared/types'
 import { useWorkspaceStore, type SidebarView } from '../stores/workspace'
+import { useSettingsStore } from '../stores/settings'
 import FileTree from './FileTree.vue'
 import OutlineView from './OutlineView.vue'
 import SearchPanel from './SearchPanel.vue'
@@ -14,6 +15,7 @@ import { toast } from '../lib/bus'
 import { t, tf } from '../lib/i18n'
 
 const workspace = useWorkspaceStore()
+const settings = useSettingsStore()
 
 const emit = defineEmits<{
   (e: 'open-file', path: string): void
@@ -22,6 +24,58 @@ const emit = defineEmits<{
 }>()
 
 const view = ref<SidebarView>('files')
+
+/* ----------------------------- resize (drag) ------------------------------ */
+
+/** Limits match `.sidebar-panel` in `themes/index.css`. */
+const SIDEBAR_MIN_WIDTH = 180
+const SIDEBAR_MAX_WIDTH = 460
+
+function clampSidebarWidth(px: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(px)))
+}
+
+const sidebarWidth = ref(clampSidebarWidth(settings.settings.workspace.sidebarWidth))
+
+/** Cancels an in-flight drag when the sidebar unmounts (e.g. focus mode). */
+let stopResize: (() => void) | null = null
+
+function startResize(event: PointerEvent): void {
+  if (event.button !== 0) return
+  event.preventDefault()
+  stopResize?.()
+  const handle = event.currentTarget as HTMLElement
+  try {
+    handle.setPointerCapture?.(event.pointerId)
+  } catch {
+    /* capture is optional (synthetic events) */
+  }
+  const startX = event.clientX
+  const startWidth = sidebarWidth.value
+
+  const onMove = (ev: PointerEvent): void => {
+    sidebarWidth.value = clampSidebarWidth(startWidth + ev.clientX - startX)
+  }
+  const onEnd = (): void => {
+    cleanup()
+    settings.patch({ workspace: { sidebarWidth: sidebarWidth.value } })
+  }
+  const cleanup = (): void => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onEnd)
+    window.removeEventListener('pointercancel', onEnd)
+    document.body.classList.remove('sidebar-resizing')
+    stopResize = null
+  }
+
+  stopResize = cleanup
+  document.body.classList.add('sidebar-resizing')
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onEnd)
+  window.addEventListener('pointercancel', onEnd)
+}
+
+onBeforeUnmount(() => stopResize?.())
 
 const views: { id: SidebarView; label: string }[] = [
   { id: 'files', label: 'ui.sidebarFiles' },
@@ -140,77 +194,90 @@ function onRootContextMenu(event: MouseEvent): void {
 </script>
 
 <template>
-  <aside class="sidebar">
-    <div class="sidebar-tabs">
-      <button
-        v-for="item in views"
-        :key="item.id"
-        type="button"
-        class="sidebar-tab"
-        :class="{ active: view === item.id }"
-        @click="view = item.id"
-      >
-        {{ t(item.label) }}
-      </button>
-    </div>
-
-    <!-- file tree -->
-    <div v-if="view === 'files'" class="sidebar-body">
-      <div class="sidebar-toolbar">
-        <input
-          v-model="workspace.filter"
-          class="sidebar-filter"
-          :placeholder="t('ui.filterPlaceholder')"
-        />
-        <button type="button" class="sb-icon" :title="t('ui.newFile')" @click="newFile">＋</button>
-        <button type="button" class="sb-icon" :title="t('ui.newFolder')" @click="newFolder">
-          🗀
-        </button>
+  <div class="sidebar-panel" :style="{ width: `${sidebarWidth}px` }">
+    <aside class="sidebar">
+      <div class="sidebar-tabs">
         <button
+          v-for="item in views"
+          :key="item.id"
           type="button"
-          class="sb-icon"
-          :title="t('ui.refreshWorkspace')"
-          @click="workspace.refresh()"
+          class="sidebar-tab"
+          :class="{ active: view === item.id }"
+          @click="view = item.id"
         >
-          ⟳
+          {{ t(item.label) }}
         </button>
       </div>
-      <div class="sidebar-scroll">
-        <div v-if="treeEmpty" class="sidebar-empty-box">
-          <p>{{ t('ui.noWorkspace') }}</p>
-          <button type="button" class="btn primary" @click="workspace.openFolder()">
-            {{ t('ui.openFolder') }}
+
+      <!-- file tree -->
+      <div v-if="view === 'files'" class="sidebar-body">
+        <div class="sidebar-toolbar">
+          <input
+            v-model="workspace.filter"
+            class="sidebar-filter"
+            :placeholder="t('ui.filterPlaceholder')"
+          />
+          <button type="button" class="sb-icon" :title="t('ui.newFile')" @click="newFile">
+            ＋
+          </button>
+          <button type="button" class="sb-icon" :title="t('ui.newFolder')" @click="newFolder">
+            🗀
+          </button>
+          <button
+            type="button"
+            class="sb-icon"
+            :title="t('ui.refreshWorkspace')"
+            @click="workspace.refresh()"
+          >
+            ⟳
           </button>
         </div>
-        <template v-else>
-          <div
-            class="workspace-root"
-            :title="workspace.root ?? ''"
-            @contextmenu.prevent="onRootContextMenu"
-          >
-            📁 {{ workspace.rootName }}
+        <div class="sidebar-scroll">
+          <div v-if="treeEmpty" class="sidebar-empty-box">
+            <p>{{ t('ui.noWorkspace') }}</p>
+            <button type="button" class="btn primary" @click="workspace.openFolder()">
+              {{ t('ui.openFolder') }}
+            </button>
           </div>
-          <FileTree
-            :nodes="workspace.filteredNodes"
-            @open-file="(p) => emit('open-file', p)"
-            @context-menu="onContextMenu"
-          />
-        </template>
+          <template v-else>
+            <div
+              class="workspace-root"
+              :title="workspace.root ?? ''"
+              @contextmenu.prevent="onRootContextMenu"
+            >
+              📁 {{ workspace.rootName }}
+            </div>
+            <FileTree
+              :nodes="workspace.filteredNodes"
+              @open-file="(p) => emit('open-file', p)"
+              @context-menu="onContextMenu"
+            />
+          </template>
+        </div>
       </div>
-    </div>
 
-    <!-- outline -->
-    <div v-else-if="view === 'outline'" class="sidebar-body">
-      <div class="sidebar-scroll">
-        <OutlineView @jump="(p) => emit('jump', p)" />
+      <!-- outline -->
+      <div v-else-if="view === 'outline'" class="sidebar-body">
+        <div class="sidebar-scroll">
+          <OutlineView @jump="(p) => emit('jump', p)" />
+        </div>
       </div>
-    </div>
 
-    <!-- search -->
-    <div v-else class="sidebar-body">
-      <div class="sidebar-scroll">
-        <SearchPanel @open-result="(m) => emit('open-result', m)" />
+      <!-- search -->
+      <div v-else class="sidebar-body">
+        <div class="sidebar-scroll">
+          <SearchPanel @open-result="(m) => emit('open-result', m)" />
+        </div>
       </div>
-    </div>
-  </aside>
+    </aside>
+    <div
+      class="sidebar-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      :aria-valuenow="sidebarWidth"
+      :aria-valuemin="SIDEBAR_MIN_WIDTH"
+      :aria-valuemax="SIDEBAR_MAX_WIDTH"
+      @pointerdown="startResize"
+    ></div>
+  </div>
 </template>

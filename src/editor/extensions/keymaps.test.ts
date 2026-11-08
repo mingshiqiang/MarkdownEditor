@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { EditorState } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
-import { insertTableCommand, setHeadingCommand, toggleWrapCommand } from './keymaps'
+import {
+  indentBlock,
+  indentCodeBlock,
+  insertTableCommand,
+  setHeadingCommand,
+  toggleWrapCommand
+} from './keymaps'
 
 /** Minimal headless EditorView stand-in (state + dispatch). */
 function makeView(doc: string, from = 0, to = from) {
@@ -78,5 +84,77 @@ describe('insertTableCommand', () => {
     const text = view.state.doc.toString()
     expect(text).toContain('| --- | --- |')
     expect(text.split('\n')).toHaveLength(3)
+  })
+})
+
+describe('indentCodeBlock', () => {
+  const code = (lines: string[]): string => lines.join('\n')
+
+  it('indents every selected code line and keeps the fence markers', () => {
+    const doc = code(['```js', 'const a = 1', 'const b = 2', '```'])
+    const from = doc.indexOf('const a')
+    const to = doc.indexOf('const b') + 'const b = 2'.length
+    const view = makeView(doc, from, to)
+    expect(indentCodeBlock(1)(view)).toBe(true)
+    expect(view.state.doc.toString()).toBe(code(['```js', '  const a = 1', '  const b = 2', '```']))
+    expect(view.state.selection.main.from).toBe(from + 2)
+    expect(view.state.selection.main.to).toBe(to + 4)
+  })
+
+  it('does not indent a line when the selection ends at its start', () => {
+    const doc = code(['```', 'a', 'b', '```'])
+    const view = makeView(doc, doc.indexOf('a'), doc.indexOf('b'))
+    indentCodeBlock(1)(view)
+    expect(view.state.doc.toString()).toBe(code(['```', '  a', 'b', '```']))
+  })
+
+  it('never indents the fence markers of a full-block selection', () => {
+    const doc = code(['```', 'a', '```'])
+    const view = makeView(doc, 0, doc.length)
+    indentCodeBlock(1)(view)
+    expect(view.state.doc.toString()).toBe(code(['```', '  a', '```']))
+  })
+
+  it('outdents by one unit instead of stripping all indentation', () => {
+    const doc = code(['```', '  a', '    b', '```'])
+    const view = makeView(doc, doc.indexOf('a'), doc.indexOf('b') + 1)
+    indentCodeBlock(-1)(view)
+    expect(view.state.doc.toString()).toBe(code(['```', 'a', '  b', '```']))
+  })
+
+  it('inserts a unit at a collapsed caret', () => {
+    const doc = code(['```', 'abc', '```'])
+    const view = makeView(doc, doc.indexOf('b'))
+    expect(indentCodeBlock(1)(view)).toBe(true)
+    expect(view.state.doc.toString()).toBe(code(['```', 'a  bc', '```']))
+    expect(view.state.selection.main.head).toBe(doc.indexOf('b') + 2)
+  })
+
+  it('outdents the caret line when the selection is collapsed', () => {
+    const doc = code(['```', '  abc', '```'])
+    const view = makeView(doc, doc.indexOf('c'))
+    expect(indentCodeBlock(-1)(view)).toBe(true)
+    expect(view.state.doc.toString()).toBe(code(['```', 'abc', '```']))
+  })
+
+  it('consumes the key at column zero so focus cannot leave the editor', () => {
+    const doc = code(['```', 'abc', '```'])
+    const view = makeView(doc, doc.indexOf('a'))
+    expect(indentCodeBlock(-1)(view)).toBe(true)
+    expect(view.state.doc.toString()).toBe(doc)
+  })
+
+  it('leaves the document alone outside a fence', () => {
+    const view = makeView('plain text', 0, 5)
+    expect(indentCodeBlock(1)(view)).toBe(false)
+    expect(view.state.doc.toString()).toBe('plain text')
+  })
+})
+
+describe('indentBlock', () => {
+  it('falls back to list indentation outside code blocks', () => {
+    const view = makeView('- item', 2, 2)
+    expect(indentBlock(1)(view)).toBe(true)
+    expect(view.state.doc.toString()).toBe('  - item')
   })
 })

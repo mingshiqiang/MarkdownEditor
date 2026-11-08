@@ -42,6 +42,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   workspace: {
     sidebarVisible: true,
+    sidebarWidth: 268,
     sidebarView: 'files',
     focusMode: false,
     typewriterMode: false,
@@ -87,6 +88,8 @@ export interface AppSettings {
   /** Sidebar & writing aids (M3). */
   workspace: {
     sidebarVisible: boolean
+    /** Sidebar width in px (drag the divider on its right edge). */
+    sidebarWidth: number
     sidebarView: 'files' | 'outline' | 'search'
     focusMode: boolean
     typewriterMode: boolean
