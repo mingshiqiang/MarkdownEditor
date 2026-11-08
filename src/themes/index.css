@@ -346,8 +346,8 @@ input:focus {
 
 .title-logo {
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   pointer-events: none;
 }
 
@@ -734,6 +734,33 @@ body.sidebar-resizing * {
 }
 .outline-item.level-6 {
   padding-left: 58px;
+}
+
+.outline-toggle,
+.outline-toggle-spacer {
+  flex: none;
+  width: 12px;
+}
+
+.outline-toggle {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg-subtle);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.outline-toggle:hover {
+  color: var(--fg);
+  background: var(--bg-tab-active);
 }
 
 .outline-text {

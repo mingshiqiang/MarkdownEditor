@@ -34,6 +34,7 @@ import {
   textOffsetIn
 } from '../textMap'
 import { CODE_LANGUAGES, fenceLangRange, fenceLanguage } from '../fence'
+import { estimateBlockHeight, type BlockMetrics } from '../blockHeight'
 import { addRemoteImageButtons } from '../remoteImage'
 import { markerOf, markerRange, sourceLineClasses } from '../sourceStyle'
 import { caretScrollDelta, dragMovesForward } from '../selectionGeometry'
@@ -89,15 +90,43 @@ class BlockMarkerWidget extends WidgetType {
   }
 }
 
+/** Editor metrics used to estimate the height of not-yet-rendered blocks. */
+function blockMetrics(): BlockMetrics {
+  if (typeof document === 'undefined') return { font: 16, line: 27.2, width: 772 }
+  const style = getComputedStyle(document.documentElement)
+  const font = parseFloat(style.getPropertyValue('--ed-font-size')) || 16
+  const ratio = parseFloat(style.getPropertyValue('--ed-line-height')) || 1.7
+  const maxWidth = parseFloat(style.getPropertyValue('--ed-max-width')) || 820
+  const content = document.querySelector('.cm-content')
+  const width =
+    content instanceof HTMLElement && content.clientWidth > 0 ? content.clientWidth : maxWidth - 48
+  return { font, line: font * ratio, width }
+}
+
 class MarkdownBlockWidget extends WidgetType {
+  private heightEstimate: number | null = null
+
   constructor(
     readonly block: Block,
     readonly rev: number,
     readonly docId: string,
     readonly tableKey: string,
-    readonly activeCell: { row: number; col: number } | null
+    readonly activeCell: { row: number; col: number } | null,
+    readonly metrics: BlockMetrics
   ) {
     super()
+  }
+
+  /**
+   * CodeMirror's height map falls back to one line height for widgets
+   * without an estimate, which made the scrollbar jump when unmeasured
+   * blocks entered the viewport.
+   */
+  get estimatedHeight(): number {
+    if (this.heightEstimate === null) {
+      this.heightEstimate = estimateBlockHeight(this.block, this.metrics)
+    }
+    return this.heightEstimate
   }
 
   eq(other: MarkdownBlockWidget): boolean {
@@ -943,6 +972,7 @@ function buildDecorations(state: EditorState): DecorationSet {
   const mermaidRev = mermaidRenderRev()
   const docId = state.field(docIdField, false) || ''
   const head = state.selection.main.head
+  const metrics = blockMetrics()
 
   const deco: Range<Decoration>[] = []
   const atomic: Range<Decoration>[] = []
@@ -972,7 +1002,7 @@ function buildDecorations(state: EditorState): DecorationSet {
           activeCell = activeCellFor(block, head)
         }
         const rep = Decoration.replace({
-          widget: new MarkdownBlockWidget(block, rev + mermaidRev, docId, key, activeCell),
+          widget: new MarkdownBlockWidget(block, rev + mermaidRev, docId, key, activeCell, metrics),
           block: true
         })
         deco.push(rep.range(block.from, block.to))
