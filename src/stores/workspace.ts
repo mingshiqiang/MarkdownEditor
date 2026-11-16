@@ -4,7 +4,7 @@ import { toast } from '../lib/bus'
 import { t } from '../lib/i18n'
 import { useSettingsStore } from './settings'
 
-export type SidebarView = 'files' | 'outline' | 'search'
+export type SidebarView = 'outline' | 'search'
 
 export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({

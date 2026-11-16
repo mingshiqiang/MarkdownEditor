@@ -650,7 +650,6 @@ onBeforeUnmount(() => {
     <div class="app-body">
       <Sidebar
         v-if="settings.settings.workspace.sidebarVisible && !settings.settings.workspace.focusMode"
-        @open-file="openWorkspaceFile"
         @jump="(p) => editorHost?.jumpTo(p)"
         @open-result="openSearchResult"
       />
